@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" class="site">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Front Office</title>
+<meta name="description" content="Start/sit, waivers, trades and values for three Sleeper leagues.">
+<meta name="theme-color" content="#14181C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Front Office">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!--BODY-->
+<header class="top">
+  <div class="bar"><h1 class="mark cond">Front <b>Office</b></h1><span class="stamp" id="stamp">Loading…</span><button class="icon-btn" data-info="1" aria-label="Data and inputs">Data</button></div>
+  <nav class="leagues" id="leagues" aria-label="League"></nav>
+</header>
+<nav class="tabs" role="tablist" aria-label="Tools">
+  <button class="tab" role="tab" data-tab="lineup">Lineup<span class="tn">start / sit</span></button>
+  <button class="tab" role="tab" data-tab="waivers">Waivers<span class="tn">claims</span></button>
+  <button class="tab" role="tab" data-tab="trades">Trades<span class="tn">builder</span></button>
+  <button class="tab" role="tab" data-tab="values">Values<span class="tn">all players</span></button>
+  <button class="tab" role="tab" data-tab="signals">Signals<span class="tn">movers</span></button>
+</nav>
+<main id="main"><div class="empty">Loading this week's numbers…</div></main>
+<!--/BODY-->
+<script src="app.js"></script>
+</body>
+</html>

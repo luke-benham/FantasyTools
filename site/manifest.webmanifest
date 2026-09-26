@@ -1,0 +1,15 @@
+{
+  "name": "Front Office",
+  "short_name": "Front Office",
+  "description": "Start/sit, waivers, trades and values for three Sleeper leagues.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14181C",
+  "theme_color": "#14181C",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}
+  ]
+}
