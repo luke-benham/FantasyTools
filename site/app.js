@@ -420,7 +420,7 @@ function renderTrades() {
       const p = pl(id), on = set.has(id);
       return `<button class="row pbtn${on ? ' picked' : ''}" data-t="${key}" data-id="${esc(id)}" aria-pressed="${on}"><div class="slot"><span class="check">✓</span></div>
         <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}${r.reserve.includes(id) ? '<span class="pill warn">IR</span>' : ''}</div>
-        <div class="meta">${posTag(p)} ${esc(p.tm || '')} · ROS ${f1(p.ros?.ppw)}/wk · Sleeper ${p.lens?.rk ? p.pos + p.lens.rk : '–'} · mkt ${kfmt(p.mkt?.v)}</div>${sigChips(p, 2)}</div>
+        <div class="meta">${posTag(p)} <span class="m-long">${esc(p.tm || '')} · </span>${f1(p.ros?.ppw)}/wk<span class="m-long"> · Sleeper ${p.lens?.rk ? p.pos + p.lens.rk : '–'} · mkt ${kfmt(p.mkt?.v)}</span></div>${sigChips(p, 2)}</div>
         <div class="fig"><div class="v">${f1(c.value(id))}</div><div class="u">value</div></div></button>`; }).join('')}</div>`;
   };
   let verdict = '';
