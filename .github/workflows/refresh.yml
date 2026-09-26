@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main          # reruns build on the latest main, not the commit that first triggered them
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -36,12 +38,21 @@ jobs:
         run: |
           git config user.name "front-office-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add site/data snapshots
-          if ! git diff --cached --quiet; then
-            git commit -m "Refresh data $(date -u +%Y-%m-%dT%H:%MZ)"
-            git pull --rebase --autostash
-            git push
-          fi
+          # Generated files always win: park them, move to the newest main, put them back, commit.
+          tmp=$(mktemp -d)
+          cp -r site/data "$tmp/data"
+          cp -r snapshots "$tmp/snapshots"
+          for i in 1 2 3; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            rm -rf site/data && cp -r "$tmp/data" site/data
+            cp -r "$tmp/snapshots/." snapshots/
+            git add site/data snapshots
+            git diff --cached --quiet && break
+            git commit -q -m "Refresh data $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push -q origin HEAD:main && break
+            sleep 5
+          done
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
