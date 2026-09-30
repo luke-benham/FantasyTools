@@ -282,74 +282,111 @@ function renderLineup() {
 }
 
 // ---------------------------------------------------------------- WAIVERS tab
-function fabRange(gain, left) {
+// Swap score: half the next three weeks (this week's blend, then Rotowire; byes count 0), half rest-of-season points/week.
+const n3 = p => p.n3 ?? (p.wk?.mu ?? 0);
+const rosW = p => p.ros?.ppw ?? 0;
+const swapScore = p => 0.5 * n3(p) + 0.5 * rosW(p);
+function bidRange(dRos, kind, left) {
+  if (kind === 'short' && dRos < 0.5) return '$0–2';
   let lo, hi;
-  if (gain >= 15) [lo, hi] = [0.25, 0.4]; else if (gain >= 8) [lo, hi] = [0.12, 0.25];
-  else if (gain >= 4) [lo, hi] = [0.05, 0.12]; else if (gain >= 1.5) [lo, hi] = [0.01, 0.05]; else return '$0–1';
+  if (dRos >= 4) [lo, hi] = [0.25, 0.4]; else if (dRos >= 2) [lo, hi] = [0.1, 0.25];
+  else if (dRos >= 1) [lo, hi] = [0.03, 0.1]; else if (dRos >= 0.3) [lo, hi] = [0.01, 0.03]; else return '$0–1';
   const a = Math.max(1, Math.round(left * lo)), b = Math.max(a, Math.round(left * hi));
   return `$${a}–${b}`;
 }
 function waiverPlan(c) {
   const me = c.me, L = c.L;
-  const mine = me.players.filter(id => !me.reserve.includes(id));
-  const need = { QB: c.slots.QB, RB: c.slots.RB, WR: c.slots.WR, TE: c.slots.TE, K: c.slots.K, DEF: c.slots.DEF };
-  const count = {}; mine.forEach(id => { const p = pl(id).pos; count[p] = (count[p] || 0) + 1; });
-  const openSpots = Math.max(0, L.slots.length - mine.length);
-  const drops = mine.filter(id => SKILL.includes(pl(id).pos)).sort((a, b) => c.value(a) - c.value(b));
-  const fa = S.D.players.filter(p => SKILL.includes(p.pos) && !c.rostered.has(p.id) && !['IR', 'Out', 'Sus'].includes(p.inj))
-    .map(p => ({ p, v: c.value(p.id) })).filter(x => x.v > 0.3).sort((a, b) => b.v - a.v);
-  const claims = []; const usedDrops = new Set(); let open = openSpots;
-  const capPos = { QB: need.QB + c.slots.SFLEX + 1, TE: need.TE + 1 };
-  for (const x of fa) {
-    if (claims.length >= 3) break;
-    let drop = null;
-    const full = capPos[x.p.pos] != null && (count[x.p.pos] || 0) >= capPos[x.p.pos];
-    if (full) {
-      drop = drops.find(d => !usedDrops.has(d) && pl(d).pos === x.p.pos);
-      if (!drop || x.v - c.value(drop) < 1.5) continue;
-    } else if (!open) {
-      drop = drops.find(d => !usedDrops.has(d) && (pl(d).pos === x.p.pos || (count[pl(d).pos] || 0) - 1 >= (need[pl(d).pos] || 0)));
-      if (!drop) break;
-    }
-    const gain = x.v - (drop ? c.value(drop) : 0);
-    if (gain < 1.5) { if (full) continue; break; }
-    if (drop) { usedDrops.add(drop); count[pl(drop).pos]--; } else open--;
-    count[x.p.pos] = (count[x.p.pos] || 0) + 1;
-    claims.push({ add: x.p, drop: drop ? pl(drop) : null, gain });
+  const irOk = new Set(L.ir_ok || ['IR', 'PUP']);
+  let irFree = Math.max(0, (L.ir || 0) - me.reserve.length);
+  const irMoves = [];
+  let active = me.players.filter(id => !me.reserve.includes(id));
+  for (const id of [...active].sort((a, b) => rosW(pl(b)) - rosW(pl(a)))) {
+    if (irFree > 0 && irOk.has(pl(id).inj)) { irMoves.push(pl(id)); irFree--; }
   }
-  // streaming: K / DEF this week
+  const moved = new Set(irMoves.map(p => p.id));
+  active = active.filter(id => !moved.has(id));
+  const openSpots = Math.max(0, L.slots.length - active.length);
+  const need = { QB: c.slots.QB, RB: c.slots.RB, WR: c.slots.WR, TE: c.slots.TE, K: c.slots.K, DEF: c.slots.DEF };
+  const cap = { QB: c.slots.QB + c.slots.SFLEX + 1, TE: c.slots.TE + 1 };
+  const count = {}; active.forEach(id => { const p = pl(id).pos; count[p] = (count[p] || 0) + 1; });
+  const lineOf = p => p.pos === 'QB' ? c.lines.QB : p.pos === 'TE' ? { W: Math.min(c.lines.TE.W, c.lines.FLEX.W) } : c.lines.FLEX;
+  const board = active.filter(id => SKILL.includes(pl(id).pos)).map(id => {
+    const p = pl(id);
+    return { p, swap: swapScore(p), below: rosW(p) < lineOf(p).W, needed: (count[p.pos] || 0) <= (need[p.pos] || 0), irElig: irOk.has(p.inj) };
+  }).sort((a, b) => a.swap - b.swap);
+  const dropFor = fa => {
+    if (openSpots > 0) return null;
+    const full = cap[fa.pos] != null && (count[fa.pos] || 0) >= cap[fa.pos];
+    const d = board.find(x => full ? x.p.pos === fa.pos : (x.p.pos === fa.pos || !x.needed));
+    return d ? d.p : undefined;
+  };
+  const cands = S.D.players.filter(p => SKILL.includes(p.pos) && !c.rostered.has(p.id) && !['IR', 'Out', 'Sus', 'PUP'].includes(p.inj))
+    .sort((a, b) => swapScore(b) - swapScore(a)).slice(0, 40)
+    .map(p => {
+      const d = dropFor(p);
+      if (d === undefined) return null;
+      const dRos = rosW(p) - (d ? rosW(d) : 0), dN3 = n3(p) - (d ? n3(d) : 0);
+      return { add: p, drop: d, dRos, dN3, dSwap: swapScore(p) - (d ? swapScore(d) : 0), kind: (dRos >= 1 || dRos >= dN3) ? 'hold' : 'short' };
+    }).filter(Boolean).sort((a, b) => b.dSwap - a.dSwap).slice(0, 10);
   const streams = [];
   for (const pos of ['K', 'DEF']) {
     if (!need[pos]) continue;
-    const have = mine.filter(id => pl(id).pos === pos).sort((a, b) => (pl(b).wk?.mu ?? 0) - (pl(a).wk?.mu ?? 0))[0];
+    const have = active.filter(id => pl(id).pos === pos).sort((a, b) => (pl(b).wk?.mu ?? 0) - (pl(a).wk?.mu ?? 0))[0];
     const best = S.D.players.filter(p => p.pos === pos && !c.rostered.has(p.id) && !started(p)).sort((a, b) => (b.wk?.mu ?? 0) - (a.wk?.mu ?? 0))[0];
-    if (best && (!have || (best.wk?.mu ?? 0) - (pl(have).wk?.mu ?? 0) >= 1.5)) streams.push({ add: best, drop: have ? pl(have) : null });
+    if (best) streams.push({ add: best, drop: have ? pl(have) : null, d: (best.wk?.mu ?? 0) - (have ? pl(have).wk?.mu ?? 0 : 0) });
   }
-  return { claims, streams, fa, openSpots };
+  return { irMoves, board, cands, streams, openSpots };
 }
+const dcls = x => x > 0.25 ? 'pos-v' : x < -0.25 ? 'neg-v' : '';
+const nxText = p => (p.nx && p.nx.length ? p.nx.map(x => f1(x)).join(' · ') : f1(p.wk?.mu));
 function renderWaivers() {
-  const c = ctx(S.league), L = c.L, me = c.me;
+  const c = ctx(S.league), L = c.L, me = c.me, weeks = S.D.meta.next_weeks || [S.D.meta.week];
   const left = c.budgetLeft(me);
   const plan = waiverPlan(c);
-  const card = x => `<div class="move"><span class="verb">Claim</span><div class="what"><b>${esc(x.add.n)}</b> ${posTag(x.add)} ${esc(x.add.tm || '')}${x.drop ? ` · drop <b>${esc(x.drop.n)}</b>` : ' · open spot'}
-      <span class="why">Value ${f1(c.value(x.add.id))}${x.drop ? ` vs ${f1(c.value(x.drop.id))}` : ''} · ROS ${f1(x.add.ros.ppw)} pts/wk${x.add.ffb?.wv ? ` · Footballers #${x.add.ffb.wv}` : ''}</span>${sigChips(x.add, 3)}</div>
-      <span class="pill good">${fabRange(x.gain, left)}</span></div>`;
-  const stream = x => `<div class="move"><span class="verb">Stream</span><div class="what"><b>${esc(x.add.n)}</b> ${posTag(x.add)} ${esc(oppText(x.add))}${x.drop ? ` · over <b>${esc(x.drop.n)}</b>` : ''}
-      <span class="why">${f1(x.add.wk.mu)} vs ${x.drop ? f1(x.drop.wk.mu) : '0.0'} projected this week</span></div><span class="pill lean">$0–1</span></div>`;
-  const claims = plan.claims.length ? plan.claims.map(card).join('') : `<div class="ok">Hold. No free agent beats your weakest bench player by enough to spend a claim.</div>`;
-  const pos = S.wv.pos;
+  const wkLbl = `wk ${weeks[0]}${weeks.length > 1 ? '–' + weeks[weeks.length - 1] : ''}`;
+  const irRows = plan.irMoves.map(p => `<div class="move"><span class="verb">IR</span><div class="what">Move <b>${esc(p.n)}</b> ${posTag(p)} to IR
+      <span class="why">${esc(p.inj)} · frees a roster spot without a drop</span></div><span></span></div>`).join('');
+  const shown = S.wv.all ? plan.board : plan.board.slice(0, 6);
+  const board = shown.map((x, i) => {
+    const p = x.p, tags = [
+      x.irElig ? '<span class="pill warn">IR-eligible</span>' : '',
+      x.below ? '<span class="pill flip">below waiver line</span>' : '',
+      x.needed ? `<span class="pill lean">needed at ${esc(p.pos)}</span>` : ''].join('');
+    return `<button class="row" data-p="${esc(p.id)}"><div class="slot">#${i + 1}<small>${esc(p.pos)}</small></div>
+      <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div>
+      <div class="meta">ROS ${f1(rosW(p))}/wk${p.ros?.ecr ? ` (${p.pos}${Math.round(p.ros.ecr)})` : ''} · ${wkLbl}: ${nxText(p)} · value ${f1(c.value(p.id))}</div>
+      ${tags ? `<div class="sigs">${tags}</div>` : ''}</div>
+      <div class="fig"><div class="v">${f1(x.swap)}</div><div class="u">swap</div></div></button>`;
+  }).join('');
+  const cand = x => {
+    const verdict = x.dSwap > 0.25 ? (x.kind === 'hold' ? '<span class="pill good">Hold</span>' : '<span class="pill lean">Short-term</span>')
+      : x.dSwap >= -0.25 ? '<span class="pill flip">Even</span>' : '<span class="pill bad">Worse</span>';
+    return `<button class="row" data-p="${esc(x.add.id)}"><div class="slot">${posTag(x.add)}<small>${x.add.ros?.ecr ? '#' + Math.round(x.add.ros.ecr) : ''}</small></div>
+      <div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span>${injTag(x.add)}${x.add.ffb?.wv ? `<span class="pill ff">FF ${x.add.ffb.wv}</span>` : ''}</div>
+      <div class="meta">${x.drop ? `for ${esc(x.drop.n)}` : 'into an open spot'} · ROS <span class="${dcls(x.dRos)}">${sgn(x.dRos)}</span>/wk · ${wkLbl} <span class="${dcls(x.dN3)}">${sgn(x.dN3)}</span>/wk</div>
+      <div class="sigs">${verdict}${x.dSwap > 0.25 ? `<span class="pill lean">bid ${bidRange(x.dRos, x.kind, left)}</span>` : ''}${(x.add.sig || []).slice(0, 2).map(s => `<span class="sg ${s.d > 0 ? 'up' : s.d < 0 ? 'dn' : ''}">${s.d > 0 ? '▲ ' : s.d < 0 ? '▼ ' : ''}${esc(SIG_LABEL[s.k] || s.k)}</span>`).join('')}</div></div>
+      <div class="fig"><div class="v ${dcls(x.dSwap)}">${sgn(x.dSwap)}</div><div class="u">swap</div></div></button>`;
+  };
+  const stream = x => `<button class="row" data-p="${esc(x.add.id)}"><div class="slot">${posTag(x.add)}</div><div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span></div>
+      <div class="meta">${esc(oppText(x.add))}${x.drop ? ` · vs your ${esc(x.drop.n)} ${f1(x.drop.wk?.mu)}` : ''}</div></div>
+      <div class="fig"><div class="v ${dcls(x.d)}">${sgn(x.d)}</div><div class="u">this week</div></div></button>`;
+  const pos = S.wv.pos, kd = pos === 'K' || pos === 'DEF';
   const list = S.D.players.filter(p => !c.rostered.has(p.id) && (pos === 'SKILL' ? SKILL.includes(p.pos) : p.pos === pos))
-    .sort((a, b) => pos === 'K' || pos === 'DEF' ? (b.wk?.mu ?? 0) - (a.wk?.mu ?? 0) : (c.value(b.id) - c.value(a.id)) || ((b.ros.ppw ?? 0) - (a.ros.ppw ?? 0)))
-    .slice(0, 25).map(p => `<button class="row" data-p="${esc(p.id)}"><div class="slot">${posTag(p)}<small>${p.ros.ecr ? '#' + Math.round(p.ros.ecr) : ''}</small></div>
+    .sort((a, b) => kd ? (b.wk?.mu ?? 0) - (a.wk?.mu ?? 0) : swapScore(b) - swapScore(a))
+    .slice(0, 25).map(p => `<button class="row" data-p="${esc(p.id)}"><div class="slot">${posTag(p)}<small>${p.ros?.ecr ? '#' + Math.round(p.ros.ecr) : ''}</small></div>
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}${p.ffb?.wv ? `<span class="pill ff">FF ${p.ffb.wv}</span>` : ''}</div>
-      <div class="meta">${esc(p.tm || 'FA')} · ROS ${f1(p.ros.ppw)}/wk · wk ${S.D.meta.week} ${f1(p.wk?.mu)}${p.mkt?.v ? ` · mkt ${kfmt(p.mkt.v)}` : ''}</div>${sigChips(p, 3)}</div>
-      <div class="fig"><div class="v">${pos === 'K' || pos === 'DEF' ? f1(p.wk?.mu) : f1(c.value(p.id))}</div><div class="u">${pos === 'K' || pos === 'DEF' ? 'proj' : 'value'}</div></div></button>`).join('');
+      <div class="meta">${esc(p.tm || 'FA')} · ROS ${f1(rosW(p))}/wk · ${wkLbl}: ${nxText(p)}${p.mkt?.v ? ` · mkt ${kfmt(p.mkt.v)}` : ''}</div>${sigChips(p, 3)}</div>
+      <div class="fig"><div class="v">${kd ? f1(p.wk?.mu) : f1(swapScore(p))}</div><div class="u">${kd ? 'proj' : 'swap'}</div></div></button>`).join('');
   const comps = (L.fab_wins || []).filter(x => x.bid > 0).sort((a, b) => b.w - a.w || b.bid - a.bid).slice(0, 10)
-    .map(x => `<div class="row" style="cursor:default"><div class="slot">Wk ${x.w}</div><div class="who"><div class="nm"><span class="tx">${esc(pl(x.p).n)}</span></div><div class="meta">${posTag(pl(x.p))} · value now ${f1(c.value(x.p))}</div></div><div class="fig"><div class="v">$${x.bid}</div></div></div>`).join('');
+    .map(x => `<div class="row" style="cursor:default"><div class="slot">Wk ${x.w}</div><div class="who"><div class="nm"><span class="tx">${esc(pl(x.p).n)}</span></div><div class="meta">${posTag(pl(x.p))} · ROS now ${f1(rosW(pl(x.p)))}/wk</div></div><div class="fig"><div class="v">$${x.bid}</div></div></div>`).join('');
   const chips = ['SKILL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(k => `<button class="chip" data-wv="${k}" aria-pressed="${pos === k}">${k === 'SKILL' ? 'All' : k === 'DEF' ? 'DST' : k}</button>`).join('');
-  return `<section class="sec"><h2>Claims<span class="aside">FAB left $${left} of $${L.budget || 100}${plan.openSpots ? ` · ${plan.openSpots} open spot${plan.openSpots > 1 ? 's' : ''}` : ''}</span></h2>
-    <div class="moves">${claims}${plan.streams.map(stream).join('')}</div>
-    <p class="note">Value is rest-of-season points above this league's waiver line, scaled so the best player is 100. Bid ranges are a share of your remaining budget by how much the claim gains; check them against the league's recent winning bids below.</p></section>
+  return `${irRows ? `<section class="sec"><h2>Roster moves first</h2><div class="moves">${irRows}</div></section>` : ''}
+  <section class="sec"><h2>Your drop order<span class="aside">weakest first · swap = ½ ${wkLbl} + ½ rest of season</span></h2>
+    <div class="list">${board || '<div class="empty">No droppable players.</div>'}${plan.board.length > 6 ? `<button class="divider" data-wvall="1" style="width:100%;border:0;cursor:pointer;text-align:left">${S.wv.all ? 'Show weakest 6' : `Show all ${plan.board.length}`}</button>` : ''}</div></section>
+  <section class="sec"><h2>Claim options<span class="aside">FAB left $${left} of $${L.budget || 100}${plan.openSpots ? ` · ${plan.openSpots} open spot${plan.openSpots > 1 ? 's' : ''}` : ''}</span></h2>
+    <div class="list">${plan.cands.map(cand).join('') || '<div class="empty">No free agents at your weakest spots.</div>'}</div>
+    <p class="note">Each free agent is paired with the weakest player you could drop for him (keeping enough starters at each position, and one backup at most at QB and TE). Deltas are points per week: rest of season, and the average over ${wkLbl}. "Hold" means he's better for the rest of the season (by 1+ pt/wk, or more than over the next few weeks); "Short-term" means the gain is mostly the next few weeks. Bid ranges follow the rest-of-season gain; short-term adds stay near $0.</p></section>
+  <section class="sec"><h2>K / DST this week</h2><div class="list">${plan.streams.map(stream).join('') || '<div class="empty">No kicker or defense slots.</div>'}</div></section>
   <section class="sec"><h2>Best available</h2><div class="chips">${chips}</div><div class="list">${list || '<div class="empty">Nobody left.</div>'}</div></section>
   <section class="sec"><h2>Winning bids in ${esc(L.name)}</h2><div class="list">${comps || '<div class="empty">No paid claims yet this season.</div>'}</div></section>`;
 }
@@ -577,6 +614,7 @@ function wire() {
     if (d.tab) { S.tab = d.tab; store.set('tab', S.tab); history.replaceState(null, '', '#' + S.tab); render(); window.scrollTo(0, 0); return; }
     if (d.close) { closeSheet(); return; }
     if (d.info) { infoSheet(); return; }
+    if (d.wvall) { S.wv.all = !S.wv.all; S._keepScroll = true; render(); return; }
     if (d.wv) { S.wv.pos = d.wv; S._keepScroll = true; render(); return; }
     if (d.vpos) { S.vals.pos = d.vpos; S._keepScroll = true; render(); return; }
     if (d.vf) { S.vals.filter = S.vals.filter === d.vf ? 'all' : d.vf; S._keepScroll = true; render(); return; }

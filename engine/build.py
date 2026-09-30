@@ -240,10 +240,13 @@ def build(write_snapshot=True):
 
     # ---- Sleeper projections, stats, trending
     projW = sleeper_week_proj(week)
-    fut = {}
+    fut, byweek = {}, {}
     for w in range(ros_from, C.LAST_FANTASY_WEEK + 1):
         for sid, r in sleeper_week_proj(w).items():
-            fut[sid] = fut.get(sid, 0.0) + ((r.get("stats") or {}).get("pts_ppr") or 0.0)
+            v = (r.get("stats") or {}).get("pts_ppr") or 0.0
+            fut[sid] = fut.get(sid, 0.0) + v
+            byweek.setdefault(sid, {})[w] = v
+    next_weeks = list(range(ros_from, min(ros_from + 3, C.LAST_FANTASY_WEEK + 1)))
     q = "&".join(f"position[]={p}" for p in C.ALL_POS)
     season = {r["player_id"]: r.get("stats") or {} for r in json_get(f"{SL}/stats/nfl/{C.SEASON}?season_type=regular&{q}")}
     trend_add = {t["player_id"]: t["count"] for t in json_get(f"{SL}/v1/players/nfl/trending/add?lookback_hours=24&limit=60")}
@@ -302,6 +305,8 @@ def build(write_snapshot=True):
         s = lg["settings"]
         leagues.append({
             **L, "teams": s["num_teams"], "slots": lg["roster_positions"], "ir": s.get("reserve_slots", 0),
+            "ir_ok": ["IR", "PUP"] + [k for k, f in (("Out", "reserve_allow_out"), ("Doubtful", "reserve_allow_doubtful"),
+                                                   ("Sus", "reserve_allow_sus"), ("NA", "reserve_allow_na")) if s.get(f)],
             "budget": s.get("waiver_budget", 100), "deadline": s.get("trade_deadline"), "playoffs": s.get("playoff_week_start"),
             "waiver_day": s.get("waiver_day_of_week"), "scoring_rec": lg["scoring_settings"].get("rec"),
             "users": [{"id": u["user_id"], "name": (u.get("metadata") or {}).get("team_name") or u.get("display_name"),
@@ -365,6 +370,14 @@ def build(write_snapshot=True):
         elif ro and pos in ovr_order and sid in ovr_order[pos]:
             pos_ecr, ros_src = ovr_order[pos].index(sid) + 1.0, "fp-ovr"
         rw_ppw = fut.get(sid, 0.0) / weeks_left
+        # next three fantasy weeks: this week's blend (if not started yet), then Rotowire; byes count as 0
+        nx = []
+        for nw in next_weeks:
+            if nw == week:
+                nx.append(mu)
+            else:
+                v = byweek.get(sid, {}).get(nw, 0.0)
+                nx.append(0.0 if (out_now and inj in ("IR", "PUP", "Sus")) else v)
         if pos in C.SKILL and pos_ecr:
             ppw = ros_curve(pos, pos_ecr)
         elif pos in C.SKILL:
@@ -436,6 +449,7 @@ def build(write_snapshot=True):
                     "ppw": r1(ppw, 2), "src": ros_src},
             "lens": {"pts": r1(ss.get("pts_ppr")), "gp": int(ss.get("gp") or 0), "rk": ss.get("pos_rank_ppr"),
                      "rw_ppw": r1(rw_ppw, 2)},
+            "nx": [r1(x) for x in nx], "n3": r1(sum(nx) / len(nx), 2) if nx else None,
             "mkt": {"v": fc.get("v10"), "v8": fc.get("v8"), "trend": fc.get("trend"), "rank": fc.get("rank"),
                     "tier": fc.get("tier")} if fc else None,
             "snap": [r1(snaps[k] * 100, 0) for k in sorted(snaps)[-4:]] if snaps else None,
@@ -446,7 +460,7 @@ def build(write_snapshot=True):
     players.sort(key=lambda x: (x["ros"]["ovr"] or 999, -(x["ros"]["ppw"] or 0)))
     meta = {
         "generated": NOW.isoformat(timespec="minutes"), "season": C.SEASON, "week": week, "season_type": season_type,
-        "ros_from": ros_from, "weeks_left": weeks_left, "fp_scrape": fp_scrape,
+        "ros_from": ros_from, "next_weeks": next_weeks, "weeks_left": weeks_left, "fp_scrape": fp_scrape,
         "late_move_base": base_t.isoformat(timespec="minutes") if base_t else None,
         "ros_move_base": ros_t.isoformat(timespec="minutes") if ros_t else None,
         "footballers": sorted(os.path.basename(f) for f in glob.glob(os.path.join(INPUTS, "footballers", f"wk{week}_*.txt"))),
