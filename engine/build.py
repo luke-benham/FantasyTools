@@ -468,7 +468,7 @@ def build(write_snapshot=True):
         "user": C.SLEEPER_USER_ID, "repo": C.REPO,
     }
     model = {"ros_curve": {p: {"rank": c["rank"], "ppw": c["ppw"]} for p, c in CAL["ros_curve"].items()},
-             "weekly_error": CAL["weekly_error"]}
+             "weekly_error": CAL["weekly_error"], "qb_stream_bonus": CAL.get("qb_stream_bonus", 0)}
     os.makedirs(OUT, exist_ok=True)
     for name, obj in (("players", players), ("leagues", leagues), ("meta", meta), ("model", model)):
         with open(os.path.join(OUT, f"{name}.json"), "w") as f:

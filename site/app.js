@@ -114,9 +114,12 @@ function ctx(key) {
   const top3 = a => { const v = a.sort((x, y) => y - x).slice(0, 3); return v.length ? sum(v) / v.length : 0; };
   const ranked = ps => top3(ps.flatMap(p => [0, 1, 2].map(j => curvePts(p, first[p] + j))));
   const free = ps => top3(S.D.players.filter(p => ps.includes(p.pos) && !rostered.has(p.id)).map(p => p.ros.ppw || 0));
-  const line = (ps, starter, nSlots) => { const W = (ranked(ps) + free(ps)) / 2; return { S: Math.max(starter, W), W, b: 1 - (1 - UNAVAIL) ** nSlots }; };
+  const line = (ps, starter, nSlots, bonus = 0) => { const W = (ranked(ps) + free(ps)) / 2 + bonus; return { S: Math.max(starter, W), W, b: 1 - (1 - UNAVAIL) ** nSlots }; };
+  // QBs: a team can stream the best free-agent QB each week, so both QB lines sit higher by the streaming gain
+  // (measured 2024-25; conservative share because waiver picks happen before Sunday news).
+  const qbBonus = slots.SFLEX ? 0 : (S.D.model.qb_stream_bonus || 0);
   c.lines = {
-    QB: line(['QB'], curvePts('QB', cnts.QB), slots.QB + slots.SFLEX),
+    QB: line(['QB'], curvePts('QB', cnts.QB), slots.QB + slots.SFLEX, qbBonus),
     TE: line(['TE'], curvePts('TE', cnts.TE), slots.TE),
     FLEX: line(['RB', 'WR', 'TE'], flexLast, 2 + slots.FLEX),
   };
@@ -133,6 +136,11 @@ function ctx(key) {
   const cache = new Map();
   c.value = id => { if (!cache.has(id)) cache.set(id, raw(pl(id)) * c.scale); return cache.get(id); };
   c.budgetLeft = r => (L.budget || 100) - (r.fab || 0);
+  let rankCache = null;
+  c.rank = id => {
+    if (!rankCache) { rankCache = new Map(S.D.players.filter(p => SKILL.includes(p.pos)).map(p => [p.id, c.value(p.id)]).sort((a, b) => b[1] - a[1]).map(([pid], i) => [pid, i + 1])); }
+    return rankCache.get(id);
+  };
   S.ctx[key] = c;
   return c;
 }
@@ -473,7 +481,7 @@ function renderTrades() {
         <div class="vcell"><div class="k">Their lineup</div><div class="v ${cls(e.thL)}">${sgn(e.thL)}</div><div class="s">${e.thL >= 0 ? 'they improve too' : 'they get worse'}</div></div>
         <div class="vcell"><div class="k">Market</div><div class="v ${cls(mDelta)}">${mDelta >= 0 ? '+' : '−'}${kfmt(Math.abs(mDelta))}</div><div class="s">FantasyCalc · ${mDelta <= 0 ? 'looks fair to them' : 'they may balk'}</div></div>
       </div>
-      <div class="note">On Sleeper's projections they see ${sgn(e.sOut - e.sIn)} pts/wk for their side.${drops.length ? ' Roster limit: ' + esc(drops.join('; ')) + '.' : ''}</div></div>`;
+      <div class="note">FantasyPros overall: you get ${[...T.get].map(id => `${esc(pl(id).n.split(' ').slice(-1)[0])} #${pl(id).ros?.ovr ? Math.round(pl(id).ros.ovr) : '–'}`).join(', ') || '–'}; you give ${[...T.give].map(id => `${esc(pl(id).n.split(' ').slice(-1)[0])} #${pl(id).ros?.ovr ? Math.round(pl(id).ros.ovr) : '–'}`).join(', ') || '–'}. On Sleeper's projections they see ${sgn(e.sOut - e.sIn)} pts/wk for their side.${drops.length ? ' Roster limit: ' + esc(drops.join('; ')) + '.' : ''}</div></div>`;
   }
   S._ideas = tradeIdeas(c, opp);
   const ideas = S._ideas.map((x, i) => `<button class="idea" data-idea="${i}"><div><span class="give">Give ${esc(x.give.map(id => pl(id).n).join(' + '))}</span> · <span class="get">Get ${esc(x.get.map(id => pl(id).n).join(' + '))}</span>
@@ -487,6 +495,14 @@ function renderTrades() {
 }
 
 // ---------------------------------------------------------------- VALUES tab
+/** FantasyPros overall ROS rank, flagged when this league's value rank sits far from it. */
+function fpCell(p, c) {
+  const fp = p.ros?.ovr; if (fp == null) return '<td class="zero">–</td>';
+  const ours = c.rank(p.id), gap = ours - fp;
+  const big = ours <= 150 && Math.abs(gap) >= Math.max(15, 0.5 * Math.min(ours, fp));
+  const tag = big ? `<span class="pill ${gap < 0 ? 'good' : 'warn'}" title="Our ${esc(c.L.name)} rank #${ours}">${gap < 0 ? 'we ▲' : 'we ▼'} #${ours}</span>` : '';
+  return `<td>${Math.round(fp)}${tag ? ' ' + tag : ''}</td>`;
+}
 function renderValues() {
   const v = S.vals, cur = ctx(S.league);
   const all = S.D.leagues.map(L => ctx(L.key));
@@ -502,14 +518,14 @@ function renderValues() {
     const cells = all.map(c => { const val = c.value(p.id), mine = c.owner.get(p.id) === c.me.rid, fa = !c.rostered.has(p.id);
       return `<td class="${c.key}${mine ? ' mine' : ''}${c.key === S.league ? ' cur' : ''}"><span class="${val < 0.5 ? 'zero' : ''}">${f1(val)}</span>${fa ? '<span class="fa">FA</span>' : ''}</td>`; }).join('');
     return `<tr data-p="${esc(p.id)}"><td class="l pl"><div class="nm"><span class="tx">${esc(p.n)}</span>${dots(p.id)}${injTag(p)}</div><div class="meta">${posTag(p)}${p.ros.ecr ? Math.round(p.ros.ecr) : ''} · ${esc(p.tm || 'FA')}</div></td>
-      <td>${f1(p.ros.ppw)}</td>${cells}<td>${kfmt(p.mkt?.v)}</td><td>${p.lens?.rk ? p.pos + p.lens.rk : '–'}</td><td>${f1(p.lens?.rw_ppw)}</td></tr>`;
+      <td>${f1(p.ros.ppw)}</td>${fpCell(p, cur)}${cells}<td>${kfmt(p.mkt?.v)}</td><td>${p.lens?.rk ? p.pos + p.lens.rk : '–'}</td><td>${f1(p.lens?.rw_ppw)}</td></tr>`;
   }).join('');
   const chips = ['ALL', 'QB', 'RB', 'WR', 'TE'].map(k => `<button class="chip" data-vpos="${k}" aria-pressed="${v.pos === k}">${k === 'ALL' ? 'All' : k}</button>`).join('')
     + `<button class="chip" data-vf="mine" aria-pressed="${v.filter === 'mine'}">Mine</button><button class="chip" data-vf="fa" aria-pressed="${v.filter === 'fa'}">Free in ${esc(cur.L.name)}</button>`
     + `<input class="search" id="vq" type="search" placeholder="Find a player" aria-label="Find a player" value="${esc(v.q)}">`;
   return `<section class="sec"><h2>Values<span class="aside">sorted by ${esc(cur.L.name)} · 100 = best player</span></h2><div class="chips">${chips}</div>
-    <div class="scroll"><table class="t"><thead><tr><th class="l">Player</th><th>ROS/wk</th>${head}<th>Market</th><th>Sleeper</th><th>Sleeper proj</th></tr></thead><tbody>${body}</tbody></table></div>
-    <p class="note">ROS/wk is expected points per remaining week at the player's FantasyPros rest-of-season rank, calibrated on what players at that rank actually scored in 2024–25. League values sit at zero on each league's waiver line. Sleeper columns show what leaguemates see: season finish so far and Rotowire's projection per remaining week.</p></section>`;
+    <div class="scroll"><table class="t"><thead><tr><th class="l">Player</th><th>ROS/wk</th><th>FP #</th>${head}<th>Market</th><th>Sleeper</th><th>Sleeper proj</th></tr></thead><tbody>${body}</tbody></table></div>
+    <p class="note">ROS/wk is expected points per remaining week at the player's FantasyPros rest-of-season rank, calibrated on what players at that rank actually scored in 2024–25. League values sit at zero on each league's waiver line; quarterback lines include the points a team gets by streaming free-agent QBs. FP # is FantasyPros' overall rest-of-season rank (a generic 12-team league); the tag flags players we rank far higher or lower in this league. Sleeper columns show what leaguemates see: season finish so far and Rotowire's projection per remaining week.</p></section>`;
 }
 
 // ---------------------------------------------------------------- SIGNALS tab

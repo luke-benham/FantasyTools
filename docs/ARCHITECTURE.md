@@ -104,11 +104,12 @@ Phone (Front Office web app)
 **Engine outputs per player:** weekly `mu` (calibrated blend, late-move nudge) and `sd` (position error model), FantasyPros and Rotowire parts, expert best/worst, opponent, kickoff, implied team total; ROS points per week (`ppw`) from the calibrated curve at the FantasyPros positional ROS rank; Sleeper lens (season points/rank, Rotowire points per remaining week); FantasyCalc market; snap shares; Footballers ranks; signals.
 
 **Calibration (`engine/calibration.json`, from 2024–25):**
-- ROS curve: points per remaining week by FantasyPros positional ROS rank (QB log-linear; RB/WR/TE log-quadratic), e.g. RB12 13.1, WR24 10.4, TE6 9.9, QB12 13.1.
+- ROS curve: points per remaining week by FantasyPros positional ROS rank (RB/WR/TE log-quadratic; QB refit 2026-10-08 as a smoothed isotonic curve because the log-linear fit overstated the top), e.g. RB12 13.1, WR24 10.4, TE6 9.9, QB1 21.3, QB2 17.7, QB5 16.7, QB12 14.7.
+- QB streaming: QB starter/waiver lines are raised by 2.5 pts/wk. In 2024–25, streaming the best-projected free QB each week (QBs ranked past QB10–16) scored 19.7–22.2/wk vs 13.1–15.7 for holding the best free agents; 2.5 is a conservative share because waiver claims happen before Sunday news (research/qb_study.py).
 - Weekly error: calibration slope ≈1 for QB/RB/TE, 0.93 WR, 0.64 K; SD ≈ a + b·projection (RB 2.9+0.32p, WR 3.2+0.33p, TE 2.2+0.46p, QB 4.5+0.17p).
 
 **App logic (site/app.js):**
-- *League value:* per league, starter lines from the curve (ideal fill of QB/RB/WR/TE + flex), waiver lines = 50/50 of a ranked fill of every roster spot and the live free agents (top-3 average); RB/WR/TE share one flex line; TE also has a TE-slot line; bench-level points count by 1−0.85^slots. Scaled to 100 = best player.
+- *League value:* (QB lines include the streaming bonus; a FantasyPros overall rank column flags big disagreements) per league, starter lines from the curve (ideal fill of QB/RB/WR/TE + flex), waiver lines = 50/50 of a ranked fill of every roster spot and the live free agents (top-3 average); RB/WR/TE share one flex line; TE also has a TE-slot line; bench-level points count by 1−0.85^slots. Scaled to 100 = best player.
 - *Lineup:* greedy fill (fixed slots first, then flex) on weekly `mu`; locked players stay; win % vs next option = Φ(Δμ/√(σ₁²+σ₂²)); matchup win % from both teams' totals.
 - *Waivers:* top free agents by value, drop = lowest-value player that keeps starting requirements (QB/TE: one backup max); bid range by value gain × remaining FAB; K/DST streams by weekly projection; league winning-bid history.
 - *Trades:* value delta after forced drops, both teams' ROS lineup change, FantasyCalc market delta, what Sleeper's projections show the other manager; one-for-one ideas where both lineups improve or the market sees it as fair.
