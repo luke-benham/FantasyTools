@@ -116,9 +116,9 @@ def weekly_error(pos, mu):
     e = CAL["weekly_error"].get("DST" if pos == "DEF" else pos)
     if not e:
         return mu, 5.5
-    cal = e["mean_y"] + e["slope"] * (mu - e["mean_x"]) if mu > 0 else 0.0
-    sd = max(2.0, e["sd_a"] + e["sd_b"] * max(cal, 0))
-    return max(cal, 0.0), sd
+    # keep FantasyPros' number as is; the error model only sets the likely range (win %)
+    sd = max(2.0, e["sd_a"] + e["sd_b"] * max(mu, 0))
+    return max(mu, 0.0), sd
 
 
 def r1(x, n=1):
@@ -352,12 +352,8 @@ def build(write_snapshot=True):
         if w and base and sid in base["weekly"] and base["weekly"][sid]:
             m = math.log(base["weekly"][sid]) - math.log(w["ecr"])
             move = {"from": base["weekly"][sid], "to": w["ecr"], "m": m}
-            if wk_pages.get(pos) and r2p is not None:
-                e_adj = math.exp(math.log(w["ecr"]) - C.LATE_MOVE_K * m)
-                pts = wk_pages[pos]
-                r2p = interp([x for x, _ in pts], [y for _, y in pts], e_adj)
-        parts = [x for x in (r2p, rw) if x is not None]
-        mu_raw = sum(parts) / len(parts) if parts else 0.0
+        # FantasyPros only: the weekly projection is FantasyPros' rank-to-points for the consensus rank.
+        mu_raw = r2p if r2p is not None else 0.0
         if g is None or out_now:
             mu_raw = 0.0
         mu, sd = weekly_error(pos, mu_raw)
@@ -370,23 +366,14 @@ def build(write_snapshot=True):
         elif ro and pos in ovr_order and sid in ovr_order[pos]:
             pos_ecr, ros_src = ovr_order[pos].index(sid) + 1.0, "fp-ovr"
         rw_ppw = fut.get(sid, 0.0) / weeks_left
-        # next three fantasy weeks: this week's blend (if not started yet), then Rotowire; byes count as 0
-        nx = []
-        for nw in next_weeks:
-            if nw == week:
-                nx.append(mu)
-            else:
-                v = byweek.get(sid, {}).get(nw, 0.0)
-                nx.append(0.0 if (out_now and inj in ("IR", "PUP", "Sus")) else v)
+        # FantasyPros publishes this week only, so the short-term view is this week's projection
+        nx = [mu]
         if pos in C.SKILL and pos_ecr:
             ppw = ros_curve(pos, pos_ecr)
         elif pos in C.SKILL:
-            last = CAL["ros_curve"][pos]["rank"][-1]
-            ppw = min(rw_ppw * 0.75, ros_curve(pos, last)) if rw_ppw else 0.0
-            ros_src = "rw"
+            ppw, ros_src = 0.0, None          # not in FantasyPros' rest-of-season lists
         else:
-            ppw = rw_ppw
-            ros_src = "rw"
+            ppw, ros_src = mu, "fp-week"      # K / DST: not valued for trades; this week's FantasyPros points
 
         # ---- Sleeper lens and market
         ss = season.get(sid, {})
@@ -460,7 +447,7 @@ def build(write_snapshot=True):
     players.sort(key=lambda x: (x["ros"]["ovr"] or 999, -(x["ros"]["ppw"] or 0)))
     meta = {
         "generated": NOW.isoformat(timespec="minutes"), "season": C.SEASON, "week": week, "season_type": season_type,
-        "ros_from": ros_from, "next_weeks": next_weeks, "weeks_left": weeks_left, "fp_scrape": fp_scrape,
+        "ros_from": ros_from, "next_weeks": [week], "source": "fantasypros", "weeks_left": weeks_left, "fp_scrape": fp_scrape,
         "late_move_base": base_t.isoformat(timespec="minutes") if base_t else None,
         "ros_move_base": ros_t.isoformat(timespec="minutes") if ros_t else None,
         "footballers": sorted(os.path.basename(f) for f in glob.glob(os.path.join(INPUTS, "footballers", f"wk{week}_*.txt"))),

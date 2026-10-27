@@ -284,16 +284,16 @@ function renderLineup() {
   const ir = me.reserve.map(id => { const p = pl(id); return `<button class="row locked" data-p="${esc(id)}"><div class="slot">IR</div><div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div><div class="meta">${posTag(p)} ${esc(p.tm || '')}</div></div><div class="fig"><div class="u">ROS ${f1(p.ros?.ppw)}/wk</div></div></button>`; }).join('');
   return `${score}
   <section class="sec"><h2>Changes for week ${wk}<span class="aside">vs the lineup set in Sleeper</span></h2>${movesHtml}</section>
-  <section class="sec"><h2>Best lineup<span class="aside">blend of FantasyPros + Rotowire · bar = likely range</span></h2><div class="list">${rows}</div></section>
+  <section class="sec"><h2>Best lineup<span class="aside">FantasyPros projection · bar = likely range</span></h2><div class="list">${rows}</div></section>
   <section class="sec"><h2>Bench</h2><div class="list">${bench || '<div class="empty">No bench players.</div>'}${ir ? `<div class="divider">Injured reserve</div>${ir}` : ''}</div></section>
   <p class="note">Win % compares each starter with the best bench option for that slot, using how far projections typically miss at that position (2024–25). Below 58% is a coin flip: go with your read. Locked players count what they have scored.</p>`;
 }
 
 // ---------------------------------------------------------------- WAIVERS tab
-// Swap score: half the next three weeks (this week's blend, then Rotowire; byes count 0), half rest-of-season points/week.
-const n3 = p => p.n3 ?? (p.wk?.mu ?? 0);
+// FantasyPros only: rank by rest-of-season points/week at the FantasyPros ROS rank; this week's FantasyPros projection is shown alongside.
+const n3 = p => p.wk?.mu ?? 0;
 const rosW = p => p.ros?.ppw ?? 0;
-const swapScore = p => 0.5 * n3(p) + 0.5 * rosW(p);
+const swapScore = p => rosW(p);
 function bidRange(dRos, kind, left) {
   if (kind === 'short' && dRos < 0.5) return '$0–2';
   let lo, hi;
@@ -334,7 +334,7 @@ function waiverPlan(c) {
       const d = dropFor(p);
       if (d === undefined) return null;
       const dRos = rosW(p) - (d ? rosW(d) : 0), dN3 = n3(p) - (d ? n3(d) : 0);
-      return { add: p, drop: d, dRos, dN3, dSwap: swapScore(p) - (d ? swapScore(d) : 0), kind: (dRos >= 1 || dRos >= dN3) ? 'hold' : 'short' };
+      return { add: p, drop: d, dRos, dN3, dSwap: swapScore(p) - (d ? swapScore(d) : 0), kind: (dRos > 0.25 || dN3 <= 0) ? 'hold' : 'short' };
     }).filter(Boolean).sort((a, b) => b.dSwap - a.dSwap).slice(0, 10);
   const streams = [];
   for (const pos of ['K', 'DEF']) {
@@ -351,7 +351,7 @@ function renderWaivers() {
   const c = ctx(S.league), L = c.L, me = c.me, weeks = S.D.meta.next_weeks || [S.D.meta.week];
   const left = c.budgetLeft(me);
   const plan = waiverPlan(c);
-  const wkLbl = `wk ${weeks[0]}${weeks.length > 1 ? '–' + weeks[weeks.length - 1] : ''}`;
+  const wkLbl = `wk ${weeks[0]}`;
   const irRows = plan.irMoves.map(p => `<div class="move"><span class="verb">IR</span><div class="what">Move <b>${esc(p.n)}</b> ${posTag(p)} to IR
       <span class="why">${esc(p.inj)} · frees a roster spot without a drop</span></div><span></span></div>`).join('');
   const shown = S.wv.all ? plan.board : plan.board.slice(0, 6);
@@ -364,7 +364,7 @@ function renderWaivers() {
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div>
       <div class="meta">ROS ${f1(rosW(p))}/wk${p.ros?.ecr ? ` (${p.pos}${Math.round(p.ros.ecr)})` : ''} · ${wkLbl}: ${nxText(p)} · value ${f1(c.value(p.id))}</div>
       ${tags ? `<div class="sigs">${tags}</div>` : ''}</div>
-      <div class="fig"><div class="v">${f1(x.swap)}</div><div class="u">swap</div></div></button>`;
+      <div class="fig"><div class="v">${f1(x.swap)}</div><div class="u">ROS/wk</div></div></button>`;
   }).join('');
   const cand = x => {
     const verdict = x.dSwap > 0.25 ? (x.kind === 'hold' ? '<span class="pill good">Hold</span>' : '<span class="pill lean">Short-term</span>')
@@ -373,7 +373,7 @@ function renderWaivers() {
       <div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span>${injTag(x.add)}${x.add.ffb?.wv ? `<span class="pill ff">FF ${x.add.ffb.wv}</span>` : ''}</div>
       <div class="meta">${x.drop ? `for ${esc(x.drop.n)}` : 'into an open spot'} · ROS <span class="${dcls(x.dRos)}">${sgn(x.dRos)}</span>/wk · ${wkLbl} <span class="${dcls(x.dN3)}">${sgn(x.dN3)}</span>/wk</div>
       <div class="sigs">${verdict}${x.dSwap > 0.25 ? `<span class="pill lean">bid ${bidRange(x.dRos, x.kind, left)}</span>` : ''}${(x.add.sig || []).slice(0, 2).map(s => `<span class="sg ${s.d > 0 ? 'up' : s.d < 0 ? 'dn' : ''}">${s.d > 0 ? '▲ ' : s.d < 0 ? '▼ ' : ''}${esc(SIG_LABEL[s.k] || s.k)}</span>`).join('')}</div></div>
-      <div class="fig"><div class="v ${dcls(x.dSwap)}">${sgn(x.dSwap)}</div><div class="u">swap</div></div></button>`;
+      <div class="fig"><div class="v ${dcls(x.dSwap)}">${sgn(x.dSwap)}</div><div class="u">ROS/wk</div></div></button>`;
   };
   const stream = x => `<button class="row" data-p="${esc(x.add.id)}"><div class="slot">${posTag(x.add)}</div><div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span></div>
       <div class="meta">${esc(oppText(x.add))}${x.drop ? ` · vs your ${esc(x.drop.n)} ${f1(x.drop.wk?.mu)}` : ''}</div></div>
@@ -384,16 +384,16 @@ function renderWaivers() {
     .slice(0, 25).map(p => `<button class="row" data-p="${esc(p.id)}"><div class="slot">${posTag(p)}<small>${p.ros?.ecr ? '#' + Math.round(p.ros.ecr) : ''}</small></div>
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}${p.ffb?.wv ? `<span class="pill ff">FF ${p.ffb.wv}</span>` : ''}</div>
       <div class="meta">${esc(p.tm || 'FA')} · ROS ${f1(rosW(p))}/wk · ${wkLbl}: ${nxText(p)}${p.mkt?.v ? ` · mkt ${kfmt(p.mkt.v)}` : ''}</div>${sigChips(p, 3)}</div>
-      <div class="fig"><div class="v">${kd ? f1(p.wk?.mu) : f1(swapScore(p))}</div><div class="u">${kd ? 'proj' : 'swap'}</div></div></button>`).join('');
+      <div class="fig"><div class="v">${kd ? f1(p.wk?.mu) : f1(swapScore(p))}</div><div class="u">${kd ? 'proj' : 'ROS/wk'}</div></div></button>`).join('');
   const comps = (L.fab_wins || []).filter(x => x.bid > 0).sort((a, b) => b.w - a.w || b.bid - a.bid).slice(0, 10)
     .map(x => `<div class="row" style="cursor:default"><div class="slot">Wk ${x.w}</div><div class="who"><div class="nm"><span class="tx">${esc(pl(x.p).n)}</span></div><div class="meta">${posTag(pl(x.p))} · ROS now ${f1(rosW(pl(x.p)))}/wk</div></div><div class="fig"><div class="v">$${x.bid}</div></div></div>`).join('');
   const chips = ['SKILL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(k => `<button class="chip" data-wv="${k}" aria-pressed="${pos === k}">${k === 'SKILL' ? 'All' : k === 'DEF' ? 'DST' : k}</button>`).join('');
   return `${irRows ? `<section class="sec"><h2>Roster moves first</h2><div class="moves">${irRows}</div></section>` : ''}
-  <section class="sec"><h2>Your drop order<span class="aside">weakest first · swap = ½ ${wkLbl} + ½ rest of season</span></h2>
+  <section class="sec"><h2>Your drop order<span class="aside">weakest first by FantasyPros rest of season</span></h2>
     <div class="list">${board || '<div class="empty">No droppable players.</div>'}${plan.board.length > 6 ? `<button class="divider" data-wvall="1" style="width:100%;border:0;cursor:pointer;text-align:left">${S.wv.all ? 'Show weakest 6' : `Show all ${plan.board.length}`}</button>` : ''}</div></section>
   <section class="sec"><h2>Claim options<span class="aside">FAB left $${left} of $${L.budget || 100}${plan.openSpots ? ` · ${plan.openSpots} open spot${plan.openSpots > 1 ? 's' : ''}` : ''}</span></h2>
     <div class="list">${plan.cands.map(cand).join('') || '<div class="empty">No free agents at your weakest spots.</div>'}</div>
-    <p class="note">Each free agent is paired with the weakest player you could drop for him (keeping enough starters at each position, and one backup at most at QB and TE). Deltas are points per week: rest of season, and the average over ${wkLbl}. "Hold" means he's better for the rest of the season (by 1+ pt/wk, or more than over the next few weeks); "Short-term" means the gain is mostly the next few weeks. Bid ranges follow the rest-of-season gain; short-term adds stay near $0.</p></section>
+    <p class="note">Each free agent is paired with the weakest player you could drop for him (keeping enough starters at each position, and one backup at most at QB and TE). Deltas are points per week: rest of season (FantasyPros ROS rank) and this week (FantasyPros weekly projection). "Hold" means he is better for the rest of the season; "Short-term" means only this week is better. Bid ranges follow the rest-of-season gain; short-term adds stay near $0.</p></section>
   <section class="sec"><h2>K / DST this week</h2><div class="list">${plan.streams.map(stream).join('') || '<div class="empty">No kicker or defense slots.</div>'}</div></section>
   <section class="sec"><h2>Best available</h2><div class="chips">${chips}</div><div class="list">${list || '<div class="empty">Nobody left.</div>'}</div></section>
   <section class="sec"><h2>Winning bids in ${esc(L.name)}</h2><div class="list">${comps || '<div class="empty">No paid claims yet this season.</div>'}</div></section>`;
@@ -541,8 +541,8 @@ function renderSignals() {
       ${p.sig.map(s => `<div class="meta"><span class="sg ${s.d > 0 ? 'up' : s.d < 0 ? 'dn' : ''}">${s.d > 0 ? '▲ ' : s.d < 0 ? '▼ ' : ''}${esc(SIG_LABEL[s.k] || s.k)}</span> ${esc(s.t)}</div>`).join('')}</div>
       <div class="fig"><div class="v">${f1(c.value(p.id))}</div><div class="u">value</div></div></button>`;
   const owner = p => { const r = c.rosterOf(c.owner.get(p.id)); return r ? c.teamName(r) : ''; };
-  return `<section class="sec"><h2>Your players<span class="aside">${esc(c.L.name)}</span></h2><div class="list">${mine.map(item).join('') || '<div class="empty">Nothing new on your roster.</div>'}</div></section>
-  <section class="sec"><h2>Free agents moving</h2><div class="list">${fa.slice(0, 25).map(item).join('') || '<div class="empty">No free agents with signals.</div>'}</div></section>
+  return `<section class="sec"><h2>Your players<span class="aside">${esc(c.L.name)}</span></h2><div class="list">${mine.map(p => item(p)).join('') || '<div class="empty">Nothing new on your roster.</div>'}</div></section>
+  <section class="sec"><h2>Free agents moving</h2><div class="list">${fa.slice(0, 25).map(p => item(p)).join('') || '<div class="empty">No free agents with signals.</div>'}</div></section>
   <section class="sec"><h2>On other rosters<span class="aside">trade timing</span></h2><div class="list">${others.map(p => item(p, owner(p))).join('') || '<div class="empty">Quiet.</div>'}</div></section>
   <p class="note">Signals flag change before the consensus catches up: late FantasyPros moves (they tend to continue into Sunday), 7-day rest-of-season moves, Rotowire and FantasyPros disagreeing, FantasyCalc market swings, Sleeper-wide adds and drops, snap-share jumps, fresh injury news, and Footballers vs consensus. They never change values on their own.</p>`;
 }
@@ -566,9 +566,9 @@ function playerSheet(id) {
     <h4>Week ${S.D.meta.week} · ${esc(oppText(p))}</h4>
     <div class="kv"><div><div class="k">Projection</div><div class="v">${f1(w.mu)}</div><div class="s">likely ${f1(Math.max(0, (w.mu ?? 0) - 1.28 * (w.sd ?? 0)))}–${f1((w.mu ?? 0) + 1.28 * (w.sd ?? 0))}</div></div>
       <div><div class="k">FantasyPros</div><div class="v">${f1(w.fp)}</div><div class="s">${w.ecr ? `${p.pos}${Math.round(w.ecr)} (${w.best}–${w.worst})` : 'unranked'}</div></div>
-      <div><div class="k">Rotowire</div><div class="v">${f1(w.rw)}</div><div class="s">${w.it ? `team total ${f1(w.it)}` : '&nbsp;'}</div></div></div>
+      <div><div class="k">Sleeper shows</div><div class="v">${f1(w.rw)}</div><div class="s">not used in our numbers</div></div></div>
     <h4>Rest of season</h4>
-    <div class="kv"><div><div class="k">Points / week</div><div class="v">${f1(p.ros?.ppw)}</div><div class="s">${p.ros?.ecr ? `FantasyPros ${p.pos}${f1(p.ros.ecr)}` : 'from Rotowire'}</div></div>
+    <div class="kv"><div><div class="k">Points / week</div><div class="v">${f1(p.ros?.ppw)}</div><div class="s">${p.ros?.ecr ? `FantasyPros ${p.pos}${f1(p.ros.ecr)}` : 'not ranked by FantasyPros'}</div></div>
       <div><div class="k">Sleeper season</div><div class="v">${p.lens?.rk ? p.pos + p.lens.rk : '–'}</div><div class="s">${f1(p.lens?.pts)} pts in ${p.lens?.gp ?? 0} games</div></div>
       <div><div class="k">Market</div><div class="v">${kfmt(p.mkt?.v)}</div><div class="s">${p.mkt?.trend ? `30-day ${p.mkt.trend > 0 ? '+' : ''}${kfmt(p.mkt.trend)}` : 'FantasyCalc'}</div></div></div>
     <h4>By league</h4><div class="kv">${own}</div>
@@ -581,7 +581,7 @@ function infoSheet() {
   openSheet(`<h3>Data &amp; inputs</h3><div class="sub">Engine run ${esc(clock(m.generated))} (${esc(ago(m.generated))}) · rosters ${S.liveAt ? 'live from Sleeper' : 'from that run'}</div>
     <h4>Sources</h4><ul>
       <li>FantasyPros consensus (weekly + rest of season), scraped ${esc(m.fp_scrape || '–')}; late moves measured from ${esc(clock(m.late_move_base))}</li>
-      <li>Rotowire projections and season stats via Sleeper</li><li>FantasyCalc trade market · nflverse schedule, Vegas lines, snap counts</li>
+      <li>Sleeper: rosters, matchups, season stats (its Rotowire projections appear only as what leaguemates see)</li><li>FantasyCalc trade market · nflverse schedule, Vegas lines, snap counts</li>
       <li>Fantasy Footballers: ${m.footballers?.length ? esc(m.footballers.join(', ')) : 'nothing pasted for week ' + wk}</li></ul>
     <h4>Paste Fantasy Footballers</h4>
     <p class="note">Paste the waiver list (as copied off their page) or weekly ranks (lines like "WR12 Name"). Save opens GitHub with the file filled in; commit it and the next refresh picks it up.</p>
@@ -590,7 +590,7 @@ function infoSheet() {
     <p style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn" id="fbsave" href="https://github.com/${esc(repo)}/tree/main/inputs/footballers" target="_blank" rel="noopener">Save to GitHub</a>
       <a class="btn ghost" href="https://github.com/${esc(repo)}/actions/workflows/refresh.yml" target="_blank" rel="noopener">Run a refresh</a></p>
     <h4>How the numbers work</h4><ul>
-      <li>Weekly projection: 50/50 blend of FantasyPros and Rotowire, nudged toward late-week FantasyPros moves. In 2024–25 tests the blend was never worse than either source and best at RB and QB.</li>
+      <li>Weekly projection: FantasyPros' points for each player's consensus rank, unadjusted.</li>
       <li>Rest of season: points per week at the FantasyPros ROS rank, from what players at that rank actually scored in 2024–25 (injuries included).</li>
       <li>League value: points above each league's starter and waiver lines; bench-level points count by the chance a lineup spot opens (15% a week per slot).</li></ul>`);
   const upd = () => {

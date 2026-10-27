@@ -121,3 +121,12 @@ Phone (Front Office web app)
 - Design pass on the app with Luke; FAB bid calibration once more league bid history exists.
 - Tracker: score FantasyPros, Rotowire, blend and Footballers weekly (pairwise accuracy, waiver hit rate) and show it in the Data sheet.
 - Two-for-one trade ideas; playoff-week (15–17) weighting and bye-aware ROS lineups.
+
+
+## Change 2026-10-27: FantasyPros only
+
+At Luke's request every number that drives a decision now comes from FantasyPros:
+- Lineups and win %: FantasyPros weekly rank-to-points, unadjusted (no Rotowire blend, no late-move nudge, no calibration shift). The 2024–25 error model only sets the likely range.
+- Waivers: drop order and claim options rank by rest-of-season points at the FantasyPros ROS rank; this week's FantasyPros projection is shown as the short-term number (FantasyPros has no future-week projections). Players outside FantasyPros' ROS lists value at 0.
+- Trades and values: unchanged in source (already FantasyPros ROS ranks through the calibrated curve and league lines, with the QB streaming adjustment).
+- Still shown but never used in our numbers: Sleeper/Rotowire projections (what leaguemates see), FantasyCalc market, signals.
