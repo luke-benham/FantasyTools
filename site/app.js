@@ -290,20 +290,20 @@ function renderLineup() {
 }
 
 // ---------------------------------------------------------------- WAIVERS tab
-// FantasyPros only: rank by rest-of-season points/week at the FantasyPros ROS rank; this week's FantasyPros projection is shown alongside.
+// Waivers use the same league value as trades (FantasyPros ROS rank → points → league lines).
+// Ties at zero (below the waiver line) break on ROS points/week. This week's FantasyPros projection is a separate number.
 const n3 = p => p.wk?.mu ?? 0;
 const rosW = p => p.ros?.ppw ?? 0;
-const swapScore = p => rosW(p);
-function bidRange(dRos, kind, left) {
-  if (kind === 'short' && dRos < 0.5) return '$0–2';
+function bidRange(dVal, left) {
   let lo, hi;
-  if (dRos >= 4) [lo, hi] = [0.25, 0.4]; else if (dRos >= 2) [lo, hi] = [0.1, 0.25];
-  else if (dRos >= 1) [lo, hi] = [0.03, 0.1]; else if (dRos >= 0.3) [lo, hi] = [0.01, 0.03]; else return '$0–1';
+  if (dVal >= 15) [lo, hi] = [0.25, 0.4]; else if (dVal >= 8) [lo, hi] = [0.12, 0.25];
+  else if (dVal >= 4) [lo, hi] = [0.05, 0.12]; else if (dVal >= 1) [lo, hi] = [0.01, 0.05]; else return '$0–1';
   const a = Math.max(1, Math.round(left * lo)), b = Math.max(a, Math.round(left * hi));
   return `$${a}–${b}`;
 }
 function waiverPlan(c) {
   const me = c.me, L = c.L;
+  const key = p => c.value(p.id) + rosW(p) / 1000;
   const irOk = new Set(L.ir_ok || ['IR', 'PUP']);
   let irFree = Math.max(0, (L.ir || 0) - me.reserve.length);
   const irMoves = [];
@@ -320,7 +320,7 @@ function waiverPlan(c) {
   const lineOf = p => p.pos === 'QB' ? c.lines.QB : p.pos === 'TE' ? { W: Math.min(c.lines.TE.W, c.lines.FLEX.W) } : c.lines.FLEX;
   const board = active.filter(id => SKILL.includes(pl(id).pos)).map(id => {
     const p = pl(id);
-    return { p, swap: swapScore(p), below: rosW(p) < lineOf(p).W, needed: (count[p.pos] || 0) <= (need[p.pos] || 0), irElig: irOk.has(p.inj) };
+    return { p, swap: key(p), below: rosW(p) < lineOf(p).W, needed: (count[p.pos] || 0) <= (need[p.pos] || 0), irElig: irOk.has(p.inj) };
   }).sort((a, b) => a.swap - b.swap);
   const dropFor = fa => {
     if (openSpots > 0) return null;
@@ -329,12 +329,13 @@ function waiverPlan(c) {
     return d ? d.p : undefined;
   };
   const cands = S.D.players.filter(p => SKILL.includes(p.pos) && !c.rostered.has(p.id) && !['IR', 'Out', 'Sus', 'PUP'].includes(p.inj))
-    .sort((a, b) => swapScore(b) - swapScore(a)).slice(0, 40)
+    .sort((a, b) => key(b) - key(a)).slice(0, 40)
     .map(p => {
       const d = dropFor(p);
       if (d === undefined) return null;
       const dRos = rosW(p) - (d ? rosW(d) : 0), dN3 = n3(p) - (d ? n3(d) : 0);
-      return { add: p, drop: d, dRos, dN3, dSwap: swapScore(p) - (d ? swapScore(d) : 0), kind: (dRos > 0.25 || dN3 <= 0) ? 'hold' : 'short' };
+      const dVal = c.value(p.id) - (d ? c.value(d.id) : 0);
+      return { add: p, drop: d, dRos, dN3, dVal, dSwap: key(p) - (d ? key(d) : 0) };
     }).filter(Boolean).sort((a, b) => b.dSwap - a.dSwap).slice(0, 10);
   const streams = [];
   for (const pos of ['K', 'DEF']) {
@@ -346,6 +347,8 @@ function waiverPlan(c) {
   return { irMoves, board, cands, streams, openSpots };
 }
 const dcls = x => x > 0.25 ? 'pos-v' : x < -0.25 ? 'neg-v' : '';
+/** Value (same as trades) and this week's FantasyPros projection, side by side. */
+const figs2 = (v, w, wkLbl, cv = '', cw = '') => `<div class="figs"><div class="fig"><div class="v ${cv}">${v}</div><div class="u">value</div></div><div class="fig wkf"><div class="v ${cw}">${w}</div><div class="u">${wkLbl}</div></div></div>`;
 const nxText = p => (p.nx && p.nx.length ? p.nx.map(x => f1(x)).join(' · ') : f1(p.wk?.mu));
 function renderWaivers() {
   const c = ctx(S.league), L = c.L, me = c.me, weeks = S.D.meta.next_weeks || [S.D.meta.week];
@@ -362,38 +365,39 @@ function renderWaivers() {
       x.needed ? `<span class="pill lean">needed at ${esc(p.pos)}</span>` : ''].join('');
     return `<button class="row" data-p="${esc(p.id)}"><div class="slot">#${i + 1}<small>${esc(p.pos)}</small></div>
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div>
-      <div class="meta">ROS ${f1(rosW(p))}/wk${p.ros?.ecr ? ` (${p.pos}${Math.round(p.ros.ecr)})` : ''} · ${wkLbl}: ${nxText(p)} · value ${f1(c.value(p.id))}</div>
+      <div class="meta">${p.ros?.ecr ? `FP ${p.pos}${Math.round(p.ros.ecr)} · ` : ''}ROS ${f1(rosW(p))}/wk · ${esc(oppText(p))}</div>
       ${tags ? `<div class="sigs">${tags}</div>` : ''}</div>
-      <div class="fig"><div class="v">${f1(x.swap)}</div><div class="u">ROS/wk</div></div></button>`;
+      ${figs2(f1(c.value(p.id)), f1(n3(p)), wkLbl)}</button>`;
   }).join('');
   const cand = x => {
-    const verdict = x.dSwap > 0.25 ? (x.kind === 'hold' ? '<span class="pill good">Hold</span>' : '<span class="pill lean">Short-term</span>')
-      : x.dSwap >= -0.25 ? '<span class="pill flip">Even</span>' : '<span class="pill bad">Worse</span>';
+    const verdict = (x.dVal > 0.5 ? '<span class="pill good">Upgrade</span>'
+      : x.dVal >= -0.5 ? (x.dRos > 0.25 ? '<span class="pill lean">Slight upgrade</span>' : '<span class="pill flip">Even</span>') : '<span class="pill bad">Worse</span>')
+      + (x.dN3 >= 1 ? '<span class="pill warn">Better this week</span>' : '');
     return `<button class="row" data-p="${esc(x.add.id)}"><div class="slot">${posTag(x.add)}<small>${x.add.ros?.ecr ? '#' + Math.round(x.add.ros.ecr) : ''}</small></div>
       <div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span>${injTag(x.add)}${x.add.ffb?.wv ? `<span class="pill ff">FF ${x.add.ffb.wv}</span>` : ''}</div>
-      <div class="meta">${x.drop ? `for ${esc(x.drop.n)}` : 'into an open spot'} · ROS <span class="${dcls(x.dRos)}">${sgn(x.dRos)}</span>/wk · ${wkLbl} <span class="${dcls(x.dN3)}">${sgn(x.dN3)}</span>/wk</div>
-      <div class="sigs">${verdict}${x.dSwap > 0.25 ? `<span class="pill lean">bid ${bidRange(x.dRos, x.kind, left)}</span>` : ''}${(x.add.sig || []).slice(0, 2).map(s => `<span class="sg ${s.d > 0 ? 'up' : s.d < 0 ? 'dn' : ''}">${s.d > 0 ? '▲ ' : s.d < 0 ? '▼ ' : ''}${esc(SIG_LABEL[s.k] || s.k)}</span>`).join('')}</div></div>
-      <div class="fig"><div class="v ${dcls(x.dSwap)}">${sgn(x.dSwap)}</div><div class="u">ROS/wk</div></div></button>`;
+      <div class="meta">${x.drop ? `for ${esc(x.drop.n)}` : 'into an open spot'} · ROS <span class="${dcls(x.dRos)}">${sgn(x.dRos)}</span>/wk · ${esc(oppText(x.add))}</div>
+      <div class="sigs">${verdict}${x.dVal > 0.5 ? `<span class="pill lean">bid ${bidRange(x.dVal, left)}</span>` : ''}${(x.add.sig || []).slice(0, 2).map(s => `<span class="sg ${s.d > 0 ? 'up' : s.d < 0 ? 'dn' : ''}">${s.d > 0 ? '▲ ' : s.d < 0 ? '▼ ' : ''}${esc(SIG_LABEL[s.k] || s.k)}</span>`).join('')}</div></div>
+      ${figs2(sgn(x.dVal), sgn(x.dN3), wkLbl, dcls(x.dVal), dcls(x.dN3))}</button>`;
   };
   const stream = x => `<button class="row" data-p="${esc(x.add.id)}"><div class="slot">${posTag(x.add)}</div><div class="who"><div class="nm"><span class="tx">${esc(x.add.n)}</span></div>
       <div class="meta">${esc(oppText(x.add))}${x.drop ? ` · vs your ${esc(x.drop.n)} ${f1(x.drop.wk?.mu)}` : ''}</div></div>
       <div class="fig"><div class="v ${dcls(x.d)}">${sgn(x.d)}</div><div class="u">this week</div></div></button>`;
   const pos = S.wv.pos, kd = pos === 'K' || pos === 'DEF';
   const list = S.D.players.filter(p => !c.rostered.has(p.id) && (pos === 'SKILL' ? SKILL.includes(p.pos) : p.pos === pos))
-    .sort((a, b) => kd ? (b.wk?.mu ?? 0) - (a.wk?.mu ?? 0) : swapScore(b) - swapScore(a))
+    .sort((a, b) => kd ? (b.wk?.mu ?? 0) - (a.wk?.mu ?? 0) : (c.value(b.id) - c.value(a.id)) || (rosW(b) - rosW(a)))
     .slice(0, 25).map(p => `<button class="row" data-p="${esc(p.id)}"><div class="slot">${posTag(p)}<small>${p.ros?.ecr ? '#' + Math.round(p.ros.ecr) : ''}</small></div>
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}${p.ffb?.wv ? `<span class="pill ff">FF ${p.ffb.wv}</span>` : ''}</div>
-      <div class="meta">${esc(p.tm || 'FA')} · ROS ${f1(rosW(p))}/wk · ${wkLbl}: ${nxText(p)}${p.mkt?.v ? ` · mkt ${kfmt(p.mkt.v)}` : ''}</div>${sigChips(p, 3)}</div>
-      <div class="fig"><div class="v">${kd ? f1(p.wk?.mu) : f1(swapScore(p))}</div><div class="u">${kd ? 'proj' : 'ROS/wk'}</div></div></button>`).join('');
+      <div class="meta">${esc(p.tm || 'FA')} · ROS ${f1(rosW(p))}/wk · ${esc(oppText(p))}${p.mkt?.v ? ` · mkt ${kfmt(p.mkt.v)}` : ''}</div>${sigChips(p, 3)}</div>
+      ${kd ? `<div class="fig"><div class="v">${f1(p.wk?.mu)}</div><div class="u">${wkLbl}</div></div>` : figs2(f1(c.value(p.id)), f1(n3(p)), wkLbl)}</button>`).join('');
   const comps = (L.fab_wins || []).filter(x => x.bid > 0).sort((a, b) => b.w - a.w || b.bid - a.bid).slice(0, 10)
     .map(x => `<div class="row" style="cursor:default"><div class="slot">Wk ${x.w}</div><div class="who"><div class="nm"><span class="tx">${esc(pl(x.p).n)}</span></div><div class="meta">${posTag(pl(x.p))} · ROS now ${f1(rosW(pl(x.p)))}/wk</div></div><div class="fig"><div class="v">$${x.bid}</div></div></div>`).join('');
   const chips = ['SKILL', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'].map(k => `<button class="chip" data-wv="${k}" aria-pressed="${pos === k}">${k === 'SKILL' ? 'All' : k === 'DEF' ? 'DST' : k}</button>`).join('');
   return `${irRows ? `<section class="sec"><h2>Roster moves first</h2><div class="moves">${irRows}</div></section>` : ''}
-  <section class="sec"><h2>Your drop order<span class="aside">weakest first by FantasyPros rest of season</span></h2>
+  <section class="sec"><h2>Your drop order<span class="aside">weakest first by value · same value as trades</span></h2>
     <div class="list">${board || '<div class="empty">No droppable players.</div>'}${plan.board.length > 6 ? `<button class="divider" data-wvall="1" style="width:100%;border:0;cursor:pointer;text-align:left">${S.wv.all ? 'Show weakest 6' : `Show all ${plan.board.length}`}</button>` : ''}</div></section>
   <section class="sec"><h2>Claim options<span class="aside">FAB left $${left} of $${L.budget || 100}${plan.openSpots ? ` · ${plan.openSpots} open spot${plan.openSpots > 1 ? 's' : ''}` : ''}</span></h2>
     <div class="list">${plan.cands.map(cand).join('') || '<div class="empty">No free agents at your weakest spots.</div>'}</div>
-    <p class="note">Each free agent is paired with the weakest player you could drop for him (keeping enough starters at each position, and one backup at most at QB and TE). Deltas are points per week: rest of season (FantasyPros ROS rank) and this week (FantasyPros weekly projection). "Hold" means he is better for the rest of the season; "Short-term" means only this week is better. Bid ranges follow the rest-of-season gain; short-term adds stay near $0.</p></section>
+    <p class="note">Each free agent is paired with the weakest player you could drop for him (keeping enough starters at each position, and one backup at most at QB and TE). Two numbers on each row: <b>value</b> is the same rest-of-season league value the trade tool uses (players below the waiver line all sit at 0 and are ordered by ROS points/week), and the second is this week's FantasyPros projection. Deltas compare the free agent with the player he would replace. Bid ranges follow the value gain.</p></section>
   <section class="sec"><h2>K / DST this week</h2><div class="list">${plan.streams.map(stream).join('') || '<div class="empty">No kicker or defense slots.</div>'}</div></section>
   <section class="sec"><h2>Best available</h2><div class="chips">${chips}</div><div class="list">${list || '<div class="empty">Nobody left.</div>'}</div></section>
   <section class="sec"><h2>Winning bids in ${esc(L.name)}</h2><div class="list">${comps || '<div class="empty">No paid claims yet this season.</div>'}</div></section>`;

@@ -130,3 +130,4 @@ At Luke's request every number that drives a decision now comes from FantasyPros
 - Waivers: drop order and claim options rank by rest-of-season points at the FantasyPros ROS rank; this week's FantasyPros projection is shown as the short-term number (FantasyPros has no future-week projections). Players outside FantasyPros' ROS lists value at 0.
 - Trades and values: unchanged in source (already FantasyPros ROS ranks through the calibrated curve and league lines, with the QB streaming adjustment).
 - Still shown but never used in our numbers: Sleeper/Rotowire projections (what leaguemates see), FantasyCalc market, signals.
+- 2026-10-27 (later): Waivers show two numbers per player — league value (identical to the trade tool; zero-value ties ordered by ROS points/week) and this week's FantasyPros projection. Ranking, deltas and bid ranges use value only; the weekly number is shown, not blended in.
