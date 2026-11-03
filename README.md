@@ -1,6 +1,6 @@
 # Front Office
 
-Start/sit, waivers, trades and values for three Sleeper leagues (Maywood, Gridiron, Poker), as a web app you can add to an iPhone home screen.
+Start/sit, waivers, trades, values and next-year keeper values for three Sleeper leagues (Maywood, Gridiron, Poker), as a web app you can add to an iPhone home screen.
 
 - **App:** `site/` — static page served by GitHub Pages. It reads `site/data/*.json` and pulls rosters, free agents and matchups live from Sleeper each time it opens.
 - **Engine:** `engine/` — Python (standard library only). Gathers every source, computes player-level numbers, writes `site/data/`.
@@ -15,6 +15,8 @@ Start/sit, waivers, trades and values for three Sleeper leagues (Maywood, Gridir
 | Sleeper | Leagues, rosters, matchups, trending adds/drops, injuries, FAB history | Sleeper API (also live in the app) |
 | FantasyCalc | Trade market values and 30-day trend | FantasyCalc API |
 | nflverse | Schedule, byes, Vegas lines, snap counts | GitHub |
+| FantasyPros + FantasyCalc dynasty | Next-year keeper prices (Keepers tab) | DynastyProcess mirror; FantasyCalc API |
+| Keeper history | Keeper costs (`inputs/keepers/maywood.json`, edit after each keeper declaration) | Hand-maintained |
 | Fantasy Footballers | Weekly ranks and waiver list | Pasted into `inputs/footballers/` (the app's Data sheet prefills a GitHub commit) |
 
 How the numbers are built, and the 2024–25 backtests behind them, are in `docs/ARCHITECTURE.md`.

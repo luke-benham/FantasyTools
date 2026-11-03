@@ -10,6 +10,7 @@ import argparse, bisect, datetime as dt, glob, json, math, os, re, sys
 from . import config as C
 from .net import json_get, csv_get, num
 from .names import Index
+from .keepers import build_keepers
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "site", "data")
@@ -457,7 +458,17 @@ def build(write_snapshot=True):
     model = {"ros_curve": {p: {"rank": c["rank"], "ppw": c["ppw"]} for p, c in CAL["ros_curve"].items()},
              "weekly_error": CAL["weekly_error"], "qb_stream_bonus": CAL.get("qb_stream_bonus", 0)}
     os.makedirs(OUT, exist_ok=True)
-    for name, obj in (("players", players), ("leagues", leagues), ("meta", meta), ("model", model)):
+    keepers = {}
+    for L in leagues:
+        try:
+            k = build_keepers(L, PL, ecrdb, ids, ROS_OVR, NOW)
+        except Exception as e:  # keeper values are their own tab; never fail the whole build on them
+            log("keepers failed", L["key"], repr(e)); k = None
+        if k:
+            keepers[L["key"]] = k
+            log(f"keepers {L['key']}: {len(k['players'])} players, mode {k['mode']}")
+    meta["keepers"] = sorted(keepers)
+    for name, obj in (("players", players), ("leagues", leagues), ("meta", meta), ("model", model), ("keepers", keepers)):
         with open(os.path.join(OUT, f"{name}.json"), "w") as f:
             json.dump(obj, f, separators=(",", ":"))
     if write_snapshot:

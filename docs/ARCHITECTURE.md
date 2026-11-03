@@ -131,3 +131,28 @@ At Luke's request every number that drives a decision now comes from FantasyPros
 - Trades and values: unchanged in source (already FantasyPros ROS ranks through the calibrated curve and league lines, with the QB streaming adjustment).
 - Still shown but never used in our numbers: Sleeper/Rotowire projections (what leaguemates see), FantasyCalc market, signals.
 - 2026-10-27 (later): Waivers show two numbers per player — league value (identical to the trade tool; zero-value ties ordered by ROS points/week) and this week's FantasyPros projection. Ranking, deltas and bid ranges use value only; the weekly number is shown, not blended in.
+
+
+## Keepers (added 2026-11-02, Maywood)
+
+Goal: support a Maywood rebuild by valuing every player as a 2027 keeper and pricing trades in keeper terms. Engine `engine/keepers.py` → `site/data/keepers.json`; app tab **Keepers**; trade builder gains a "Keeper 2027" cell and a Rebuild/Compete weighting (λ = 0.25 / 1 on current value). Evidence: `research/keeper_backtest.py` → `engine/keeper_model.json`.
+
+**Rules** (`inputs/keepers/maywood.json`, edit after each declaration): one keeper per team, declared right before the draft. Cost escalates triangularly: first keep one round earlier, then two more, then three (JSN 10 → 9 → 7 → 4; Irving undrafted → 17 → 15). Undrafted players start at 17. Traded and dropped players keep their draft cost. Trade deadline week 12, no pick trading. Costs can't go earlier than round 1 (inferred from Nacua; flip `floor_at_round_1` if wrong).
+
+**Backtest (Nov 2020–24 → next August, 1,000 player-seasons, leave-one-season-out):**
+
+| November predictor | ρ vs Aug price | ρ vs next-year points | median log error |
+|---|---|---|---|
+| FP dynasty rank | 0.813 | 0.503 | 0.347 |
+| Dynasty + age shift | 0.806 | 0.507 | 0.330 |
+| FP ROS rank | 0.703 | 0.438 | 0.419 |
+| Blend + age (used, 0.7 / 0.3) | 0.797 | 0.499 | 0.317 |
+
+- Young players go *later* than their dynasty rank next August (×1.2–1.3 for ≤25; each new rookie class pushes them back); 30+ hold their spot. Remaining error is large (sd 0.44–0.68 log rank): a pick-40 projection lands anywhere from ~20 to ~75. So the app values keepers as expectations over that range, never point estimates.
+- Year over year, RBs 26+ drift ~1.8× later per season, WRs 26–27 ~1.4×, young WRs move earlier (0.79).
+- Pick value: realized points above replacement (10 teams, Maywood lineup) by preseason rank, 2021–25, monotone fit. Round 1 ≈ 93, round 2 74, rounds 3–4 46, round 5 34, round 8 22, round 12 10, round 17 1. The exponential fit understated mid/late rounds 3×.
+- Position: at the same preseason rank QBs realize 47% of the curve once the streaming line (+2.5 pts/wk) is applied; TEs 92%.
+- Maywood vs FantasyPros preseason: ρ 0.90–0.93; RBs drafted ×0.87, TEs ×0.85 earlier, QBs ×1.14 later.
+- Option value: two similar candidates held until August are worth ~26% more than the better one alone, so a team's keeper value is E[max over its candidates]; the app does this with 96 shared draws per player on live rosters.
+
+**Not tested:** FantasyCalc dynasty (no history; averaged with FP dynasty), the 0.65 discount on later seasons (judgment).

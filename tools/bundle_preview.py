@@ -5,7 +5,8 @@ S = os.path.join(ROOT, "site")
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "preview.html")
 html = open(os.path.join(S, "index.html")).read()
 body = html.split("<!--BODY-->")[1].split("<!--/BODY-->")[0]
-data = {n: json.load(open(os.path.join(S, "data", f"{n}.json"))) for n in ("players", "leagues", "meta", "model")}
+data = {n: json.load(open(os.path.join(S, "data", f"{n}.json"))) for n in ("players", "leagues", "meta", "model", "keepers")
+        if os.path.exists(os.path.join(S, "data", f"{n}.json"))}
 blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
 page = ("<title>Front Office</title>\n"
         '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'

@@ -1,0 +1,46 @@
+{
+  "_about": "Maywood keeper history. Edit this file when keepers are declared (each August) or when a rule is clarified; the next refresh picks it up. Ids are Sleeper player ids. 'keepers' lists every player kept that season; a player's escalation counts the consecutive seasons he appears here.",
+  "league": "maywood",
+  "keepers_per_team": 1,
+  "rule": {
+    "first_keep_rounds_earlier": 1,
+    "escalation": "each consecutive keep moves the cost one more round earlier than the last: -1, then -2, then -3 (JSN: round 10 -> 9 -> 7 -> 4)",
+    "undrafted_base_round": 18,
+    "undrafted_note": "an undrafted player's first keep costs round 17, then escalates the same way (Irving: 17 -> 15)",
+    "floor_at_round_1": true,
+    "floor_note": "Nacua (round 2 kept in 2025, round 1 in 2026) suggests a cost can't go earlier than round 1. Set false if a player whose cost passes round 1 can no longer be kept.",
+    "cost_follows_player": "traded and dropped players keep their original draft cost",
+    "trade_deadline_week": 12,
+    "declaration": "right before the next draft",
+    "draft_picks_tradeable": false
+  },
+  "seasons": {
+    "2025": {
+      "draft_id": "1254578875086675968",
+      "keepers": [
+        {"id": "4866", "name": "Saquon Barkley", "round": 1, "src": "sleeper flag"},
+        {"id": "11635", "name": "Ladd McConkey", "round": 8, "src": "sleeper flag"},
+        {"id": "9488", "name": "Jaxon Smith-Njigba", "round": 9, "src": "sleeper flag"},
+        {"id": "9224", "name": "Chase Brown", "round": 10, "src": "sleeper flag"},
+        {"id": "5045", "name": "Courtland Sutton", "round": 11, "src": "sleeper flag"},
+        {"id": "11584", "name": "Bucky Irving", "round": 17, "src": "sleeper flag"},
+        {"id": "9493", "name": "Puka Nacua", "round": 2, "src": "implied: same team, one round earlier, kept again in 2026"},
+        {"id": "11604", "name": "Brock Bowers", "round": 7, "src": "implied: 2026 cost was two rounds earlier"}
+      ]
+    },
+    "2026": {
+      "draft_id": "1388924725635334144",
+      "keepers": [
+        {"id": "9493", "name": "Puka Nacua", "round": 1, "src": "Luke's list"},
+        {"id": "8137", "name": "George Pickens", "round": 3, "src": "Luke's list"},
+        {"id": "11604", "name": "Brock Bowers", "round": 5, "src": "Luke's list"},
+        {"id": "12514", "name": "Emeka Egbuka", "round": 6, "src": "Luke's list"},
+        {"id": "9488", "name": "Jaxon Smith-Njigba", "round": 7, "src": "Luke's list"},
+        {"id": "9224", "name": "Chase Brown", "round": 8, "src": "Luke's list"},
+        {"id": "12508", "name": "Jaxson Dart", "round": 12, "src": "Luke's list (two rounds earlier than his 2025 pick; the rule says one)"},
+        {"id": "11564", "name": "Drake Maye", "round": 14, "src": "Luke's list"},
+        {"id": "11584", "name": "Bucky Irving", "round": 15, "src": "Luke's list"}
+      ]
+    }
+  }
+}
