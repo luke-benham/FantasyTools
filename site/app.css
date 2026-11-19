@@ -254,3 +254,7 @@ table.t.mini{min-width:0;margin-top:8px;font-size:13px}
 .vgrid.five{grid-template-columns:repeat(5,1fr)}
 @media (max-width:640px){.vgrid.five{grid-template-columns:repeat(5,1fr)}}
 code{font-size:12px}
+.krow .slot .rk{display:block;font-size:11px;color:var(--faint);font-weight:600}
+.krow.me{background:var(--lg-t)}
+.krow .kn{color:var(--good)}
+.chips .sep{width:8px}

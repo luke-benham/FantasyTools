@@ -150,9 +150,11 @@ Goal: support a Maywood rebuild by valuing every player as a 2027 keeper and pri
 
 - Young players go *later* than their dynasty rank next August (×1.2–1.3 for ≤25; each new rookie class pushes them back); 30+ hold their spot. Remaining error is large (sd 0.44–0.68 log rank): a pick-40 projection lands anywhere from ~20 to ~75. So the app values keepers as expectations over that range, never point estimates.
 - Year over year, RBs 26+ drift ~1.8× later per season, WRs 26–27 ~1.4×, young WRs move earlier (0.79).
-- Pick value: realized points above replacement (10 teams, Maywood lineup) by preseason rank, 2021–25, monotone fit. Round 1 ≈ 93, round 2 74, rounds 3–4 46, round 5 34, round 8 22, round 12 10, round 17 1. The exponential fit understated mid/late rounds 3×.
-- Position: at the same preseason rank QBs realize 47% of the curve once the streaming line (+2.5 pts/wk) is applied; TEs 92%.
+- Pick value: realized points above replacement (10 teams, Maywood lineup) by preseason rank, 2021–25, fitted as a smooth stretched exponential (2026-11-18; the earlier isotonic knots pooled rounds 3–4 into one flat value). Scale: 100 = an average first-round pick, 0 = pick 170. Round 1 = 100, 2 = 68, 3 = 51, 4 = 39, 5 = 31, 8 = 16, 12 = 6.5, 17 = 0.4.
+- Position: at the same preseason rank QBs realize about half of what other positions do once the streaming line (+2.5 pts/wk) is applied.
 - Maywood vs FantasyPros preseason: ρ 0.90–0.93; RBs drafted ×0.87, TEs ×0.85 earlier, QBs ×1.14 later.
 - Option value: two similar candidates held until August are worth ~26% more than the better one alone, so a team's keeper value is E[max over its candidates]; the app does this with 96 shared draws per player on live rosters.
 
 **Not tested:** FantasyCalc dynasty (no history; averaged with FP dynasty), the 0.65 discount on later seasons (judgment).
+
+**Keepers tab layout (2026-11-18):** a league-wide ranking by keeper surplus (sortable by next season or multi-year, with each player's gain to Luke) replaces the buy-target and free-agent lists.

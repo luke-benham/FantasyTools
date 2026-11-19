@@ -310,37 +310,44 @@ def isotonic_dec(ys, ws):
     return out
 
 
-iso = isotonic_dec([m for _, m, _ in bands], [k for _, _, k in bands])
-xs = [n for n, _, _ in bands]
-# knots at the centre of each pooled block, so the curve falls steadily instead of in steps
-knots, i = [], 0
-while i < len(iso):
-    j = i
-    while j + 1 < len(iso) and abs(iso[j + 1] - iso[i]) < 1e-9:
-        j += 1
-    w = [bands[k][2] for k in range(i, j + 1)]
-    knots.append((sum(xs[k] * bands[k][2] for k in range(i, j + 1)) / sum(w), iso[i]))
-    i = j + 1
-knots = [(x, y) for x, y in knots if x < PICKS]
-top_v = knots[0][1]
-end = 0.0                                          # pick 170 = waiver line = 0
-pick_value = [[1, 100.0]] + [[round(x, 1), round(100 * y / top_v, 2)] for x, y in knots[1:]] + [[PICKS, 0.0]]
-pv_x, pv_y = [p for p, _ in pick_value], [v for _, v in pick_value]
+# Smooth curve: stretched exponential a·e^(−k·n^p) + c fitted to the realized bands (2026-11-18).
+# The earlier isotonic knots pooled rounds 3–4 into one flat value (noise: 50 players a band), which made a
+# round-3 cost look as cheap as round 4. Scale: 100 = an average first-round pick (pick 5.5, the centre of
+# the first realized band); 0 = pick 170, the waiver line. Picks 1–4 sit above 100.
+best_s = None
+for pi in range(4, 21):
+    pp = pi / 20
+    for ki in range(1, 400):
+        kk = ki / 400
+        xs_ = [math.exp(-kk * n ** pp) for n, _, _ in bands]; ys_ = [m for _, m, _ in bands]
+        mx_, my_ = st.mean(xs_), st.mean(ys_)
+        sxx = sum((x - mx_) ** 2 for x in xs_)
+        if not sxx:
+            continue
+        aa = sum((x - mx_) * (y - my_) for x, y in zip(xs_, ys_)) / sxx
+        cc = my_ - aa * mx_
+        sse = sum((aa * x + cc - y) ** 2 for x, y in zip(xs_, ys_))
+        if aa > 0 and (best_s is None or sse < best_s[0]):
+            best_s = (sse, aa, cc, kk, pp)
+_, sa, sc, sk, sp_ = best_s
+Vraw = lambda n: sa * math.exp(-sk * n ** sp_) + sc
+top_v = Vraw(5.5) - Vraw(PICKS)            # points above replacement of an average first-round pick
+end = 0.0
 
 
 def Viso(n):
+    """Pick value on the smooth curve (name kept from the isotonic version)."""
     n = min(max(n, 1), PICKS)
-    for i in range(1, len(pv_x)):
-        if n <= pv_x[i]:
-            t = (n - pv_x[i - 1]) / (pv_x[i] - pv_x[i - 1])
-            return pv_y[i - 1] + t * (pv_y[i] - pv_y[i - 1])
-    return 0.0
+    return 100 * (Vraw(n) - Vraw(PICKS)) / top_v
 
 
-print("  pick  realized-VORP  exponential  isotonic (used)")
-for (n, m, k), y in zip(bands[:17], iso):
-    print(f"  {n:5.0f} {m:14.0f} {V(n):12.1f} {Viso(n):15.1f}")
-print("  Round values, isotonic (pick 5 of each round):", {r: round(Viso(10 * (r - 1) + 5), 1) for r in range(1, 18)})
+grid = list(range(1, 21)) + list(range(25, PICKS, 5)) + [PICKS]
+pick_value = [[n, round(Viso(n), 2)] for n in grid]
+print(f"  Smooth fit: {sa:.0f}·e^(−{sk:.3f}·pick^{sp_:.2f}) {sc:+.1f} points above replacement")
+print("  pick  realized-VORP  exponential  smooth (used)")
+for n, m, k in bands[:17]:
+    print(f"  {n:5.0f} {m:14.0f} {V(n):12.1f} {Viso(n):13.1f}")
+print("  Round values (pick 5.5 of each round):", {r: round(Viso(10 * (r - 1) + 5.5), 1) for r in range(1, 18)})
 # position factor: realized value of a position relative to the curve at the same preseason rank
 pos_val = {}
 for pos in SKILL:
@@ -362,7 +369,7 @@ for pos in SKILL:
 print(f"  Realized value ÷ curve at the same preseason rank, ranks 1–150 (QB line +{QB_STREAM:.0f} pts for streaming):", pos_val)
 sse_e = sum((V(n) - 100 * (m - end) / (top_v - end)) ** 2 * k for n, m, k in bands if n <= PICKS)
 sse_i = sum((Viso(n) - 100 * (m - end) / (top_v - end)) ** 2 * k for n, m, k in bands if n <= PICKS)
-print(f"  weighted squared error vs realized bands: exponential {sse_e:,.0f}, isotonic {sse_i:,.0f}")
+print(f"  weighted squared error vs realized bands: exponential {sse_e:,.0f}, smooth {sse_i:,.0f}")
 
 # ---------------------------------------------------------------- 5. is FantasyPros' August list Maywood's price?
 print("\n5. Is the FantasyPros preseason list the Maywood price? (non-keeper picks, 2024 and 2025)")
