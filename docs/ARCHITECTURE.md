@@ -137,7 +137,7 @@ At Luke's request every number that drives a decision now comes from FantasyPros
 
 Goal: support a Maywood rebuild by valuing every player as a 2027 keeper and pricing trades in keeper terms. Engine `engine/keepers.py` → `site/data/keepers.json`; app tab **Keepers**; trade builder gains a "Keeper 2027" cell and a Rebuild/Compete weighting (λ = 0.25 / 1 on current value). Evidence: `research/keeper_backtest.py` → `engine/keeper_model.json`.
 
-**Rules** (`inputs/keepers/maywood.json`, edit after each declaration): one keeper per team, declared right before the draft. Cost escalates triangularly: first keep one round earlier, then two more, then three (JSN 10 → 9 → 7 → 4; Irving undrafted → 17 → 15). Undrafted players start at 17. Traded and dropped players keep their draft cost. Trade deadline week 12, no pick trading. Costs can't go earlier than round 1 (inferred from Nacua; flip `floor_at_round_1` if wrong).
+**Rules** (`inputs/keepers/maywood.json`, edit after each declaration): one keeper per team, declared right before the draft. Cost escalates triangularly: first keep one round earlier, then two more, then three (JSN 10 → 9 → 7 → 4; Irving undrafted → 17 → 15). Undrafted players start at 17. Traded and dropped players keep their draft cost. Trade deadline week 12, no pick trading. A player whose cost would pass round 1 can't be kept (confirmed 2026-11-18). Next draft runs in reverse regular-season standings, snake; each team's cost pick uses its projected slot from current standings (points for breaks ties), and a trade moves the cost to the new owner's slot.
 
 **Backtest (Nov 2020–24 → next August, 1,000 player-seasons, leave-one-season-out):**
 

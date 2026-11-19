@@ -5,8 +5,9 @@ For every player who could be kept next season this computes:
   price     where he is expected to be drafted next August (median and range), from FantasyPros + FantasyCalc
             dynasty ranks, FantasyPros rest-of-season rank, an age shift and Maywood's own position pricing
   surplus   the player's value minus the value of the cost pick, on the realized pick value curve
-            (100 = pick 1, 0 = pick 170, the waiver line). Player value = curve at his projected rank ×
-            his position's realized share (QBs 0.47 once streaming is counted). 96 draws, so the app can
+            (100 = an average first-round pick, 0 = pick 170, the waiver line). Player value = curve at his
+            projected rank × his position's realized share (QBs about half). Cost pick = the owner's projected
+            slot in a snake draft run in reverse standings. 96 value draws, so the app can
             value any set of keeper options ("best of my candidates") on live rosters
   runway    later seasons he stays worth keeping as the cost escalates and his price drifts with age
 
@@ -58,9 +59,18 @@ def drift(pos, age):
     return MODEL["drift_yoy"][f"{pos}|{bucket(int(age))}"]
 
 
-def round_pick(rnd, teams):
-    """Overall pick of a keeper cost round: middle of the round (the owner's 2027 slot isn't known yet)."""
-    return teams * (rnd - 1) + (teams + 1) / 2
+def round_pick(rnd, teams, slot=None):
+    """Overall pick of a keeper cost round in a snake draft. slot = the owner's draft slot (1 = first pick);
+    None = middle of the round."""
+    if slot is None:
+        return teams * (rnd - 1) + (teams + 1) / 2
+    return teams * (rnd - 1) + (slot if rnd % 2 == 1 else teams + 1 - slot)
+
+
+def project_slots(rosters):
+    """Next draft runs in reverse regular-season standings: worst record picks first (points for breaks ties)."""
+    order = sorted(rosters, key=lambda r: (r.get("w", 0) - r.get("l", 0), r.get("pf", 0)))
+    return {r["rid"]: i + 1 for i, r in enumerate(order)}
 
 
 # 32-point normal quadrature for expectations; seeded draws for the app
@@ -163,6 +173,7 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
     posv = MODEL["pos_value"]
     aug = dt.date(nxt, 8, 15)
 
+    slots = project_slots(L["rosters"])
     rostered = {}
     for r in L["rosters"]:
         for sid in (r.get("players") or []) + (r.get("reserve") or []):
@@ -201,46 +212,58 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
         costs, k, origin, r_now = cost_rounds(sid)
         if not costs:
             continue
-        c_pick = round_pick(costs[0], teams)
+        own_slot = slots.get(rostered.get(sid))               # None for free agents: middle of the round
+        c_pick = round_pick(costs[0], teams, own_slot)
         c_val = pick_value(c_pick)
 
-        # this season's draws (seeded per player so refreshes only move when inputs move)
+        # this season's value draws (seeded per player so refreshes only move when inputs move); the app
+        # subtracts each team's own cost pick, so a trade moves the cost to the new owner's slot
         rng = random.Random(int(sid) if sid.isdigit() else hash(sid))
-        draws = [round((pv * pick_value(rank * math.exp(sd * rng.gauss(0, 1))) - c_val) * 10) for _ in range(N_DRAWS)]
-        e1 = sum(max(0, d) for d in draws) / N_DRAWS / 10
-        if e1 < 0.3 and sid not in rostered and sid not in drafted:
+        vdraws = [round(pv * pick_value(rank * math.exp(sd * rng.gauss(0, 1))) * 10) for _ in range(N_DRAWS)]
+        e1 = sum(max(0.0, v / 10 - c_val) for v in vdraws) / N_DRAWS
+        es = [round(sum(max(0.0, v / 10 - pick_value(round_pick(costs[0], teams, sl))) for v in vdraws) / N_DRAWS, 1)
+              for sl in range(1, teams + 1)]
+        if max(es) < 0.3 and sid not in rostered and sid not in drafted:
             continue
 
-        # later seasons
-        yrs, K, pr, s2 = [], 0.0, rank, sd ** 2
-        for t, cr in enumerate(costs):
-            if t:
-                pr *= math.exp(drift(pos, age + t))
-                s2 += MODEL["sigma_yoy"][pos] ** 2
-            ev = e_pos(pr, math.sqrt(s2), pick_value(round_pick(cr, teams)), pv)
-            yrs.append({"y": nxt + t, "c": cr, "p": round(pr * posf.get(pos, 1.0), 1), "e": round(ev, 1)})
-            K += DISCOUNT ** t * ev
-        runway = 0
-        for y in yrs:
-            if y["e"] < 1.0:
-                break
-            runway += 1
+        # later seasons, at every draft slot (next year's slot is projected; later ones are unknown, so they
+        # assume the same slot)
+        def seasons(slot):
+            yrs, K, pr, s2 = [], 0.0, rank, sd ** 2
+            for t, cr in enumerate(costs):
+                if t:
+                    pr *= math.exp(drift(pos, age + t))
+                    s2 += MODEL["sigma_yoy"][pos] ** 2
+                ev = e_pos(pr, math.sqrt(s2), pick_value(round_pick(cr, teams, slot)), pv)
+                yrs.append({"y": nxt + t, "c": cr, "p": round(pr * posf.get(pos, 1.0), 1), "e": round(ev, 1)})
+                K += DISCOUNT ** t * ev
+            run = 0
+            for y in yrs:
+                if y["e"] < 1.0:
+                    break
+                run += 1
+            return yrs, K, run
+        yrs, K, runway = seasons(own_slot)
+        Ks, runs = [], []
+        for sl in range(1, teams + 1):
+            _, k_s, r_s = seasons(sl)
+            Ks.append(round(k_s, 1)); runs.append(r_s)
 
         lo, hi = price * math.exp(-1.2816 * sd), price * math.exp(1.2816 * sd)
         out.append({
             "id": sid, "pos": pos, "age": round(age, 1), "origin": origin, "keeps": k, "r_now": r_now,
-            "cost": costs[0], "cpick": round(c_pick, 1), "cval": round(c_val, 1),
+            "cost": costs[0], "costs": costs, "cpick": round(c_pick, 1), "cval": round(c_val, 1),
             "price": round(price, 1), "lo": round(lo), "hi": round(hi), "rank": round(rank, 1),
             "val": round(pv * pick_value(rank), 1),
-            "e": round(e1, 1), "p_pos": round(sum(d > 0 for d in draws) / N_DRAWS, 2),
-            "K": round(K, 1), "runway": runway, "years": yrs,
-            "src": {"fp": a, "fc": b, "ros": rr, "pre": pre.get(sid)}, "d": draws,
+            "e": round(e1, 1), "p_pos": round(sum(v / 10 > c_val for v in vdraws) / N_DRAWS, 2),
+            "K": round(K, 1), "runway": runway, "years": yrs, "es": es, "Ks": Ks, "runs": runs,
+            "src": {"fp": a, "fc": b, "ros": rr, "pre": pre.get(sid)}, "v": vdraws,
         })
     out.sort(key=lambda x: -x["e"])
     return {
         "league": L["key"], "season": nxt, "generated": now.isoformat(timespec="minutes"), "mode": mode,
         "preseason_date": pre_date, "fc_error": fc_err, "draws": N_DRAWS, "teams": teams,
-        "per_team": H.get("keepers_per_team", 1), "rule": R,
+        "per_team": H.get("keepers_per_team", 1), "rule": R, "slots": slots,
         "kept": {y: sorted(v) for y, v in kept.items()},
         "model": {"pick_value": PV, "blend_weight_dynasty": w, "pos_price": posf, "pos_value": posv, "discount": DISCOUNT,
                   "sigma": MODEL["sigma_nov_aug"] if mode == "dynasty" else MODEL["sigma_preseason"],

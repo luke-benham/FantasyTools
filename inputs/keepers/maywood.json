@@ -7,8 +7,9 @@
     "escalation": "each consecutive keep moves the cost one more round earlier than the last: -1, then -2, then -3 (JSN: round 10 -> 9 -> 7 -> 4)",
     "undrafted_base_round": 18,
     "undrafted_note": "an undrafted player's first keep costs round 17, then escalates the same way (Irving: 17 -> 15)",
-    "floor_at_round_1": true,
-    "floor_note": "Nacua (round 2 kept in 2025, round 1 in 2026) suggests a cost can't go earlier than round 1. Set false if a player whose cost passes round 1 can no longer be kept.",
+    "floor_at_round_1": false,
+    "floor_note": "Confirmed 2026-11-18: the penalty keeps escalating, so a player whose cost would be earlier than round 1 can't be kept.",
+    "draft_order": "reverse regular-season standings, snake",
     "cost_follows_player": "traded and dropped players keep their original draft cost",
     "trade_deadline_week": 12,
     "declaration": "right before the next draft",
@@ -24,14 +25,13 @@
         {"id": "9224", "name": "Chase Brown", "round": 10, "src": "sleeper flag"},
         {"id": "5045", "name": "Courtland Sutton", "round": 11, "src": "sleeper flag"},
         {"id": "11584", "name": "Bucky Irving", "round": 17, "src": "sleeper flag"},
-        {"id": "9493", "name": "Puka Nacua", "round": 2, "src": "implied: same team, one round earlier, kept again in 2026"},
         {"id": "11604", "name": "Brock Bowers", "round": 7, "src": "implied: 2026 cost was two rounds earlier"}
       ]
     },
     "2026": {
       "draft_id": "1388924725635334144",
       "keepers": [
-        {"id": "9493", "name": "Puka Nacua", "round": 1, "src": "Luke's list"},
+        {"id": "9493", "name": "Puka Nacua", "round": 1, "src": "Luke's list (first keep: his round-2 2025 pick was a redraft, since a second keep would have cost round 0)"},
         {"id": "8137", "name": "George Pickens", "round": 3, "src": "Luke's list"},
         {"id": "11604", "name": "Brock Bowers", "round": 5, "src": "Luke's list"},
         {"id": "12514", "name": "Emeka Egbuka", "round": 6, "src": "Luke's list"},
