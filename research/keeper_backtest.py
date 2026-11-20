@@ -417,6 +417,111 @@ for s1, s2 in [(30, 30), (30, 20), (30, 10), (20, 20)]:
     print(f"  candidates worth {s1} and {s2}: keeping only the first {best1:.1f}, choosing in August {both2:.1f} "
           f"(+{both2 - best1:.1f}, {100 * (both2 - best1) / best1:.0f}%)")
 
+# ---------------------------------------------------------------- 7. other keeper leagues (2026-11-20)
+print("\n7. Pick value curves for each keeper league (own size, lineup and draft length)")
+LEAGUE_CFG = {
+    "maywood": {"teams": 10, "starters": {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 2}, "rounds": 17},
+    "gridiron": {"teams": 8, "starters": {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 3}, "rounds": 16},
+    "poker": {"teams": 8, "starters": {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 3}, "rounds": 19},
+}
+
+
+def repl_line(pts, teams, starters):
+    by = {p: sorted(v, reverse=True) + [0.0] * 60 for p, v in pts.items()}
+    need = {p: teams * starters[p] for p in SKILL}
+    flex = sorted(by["RB"][need["RB"]:] + by["WR"][need["WR"]:] + by["TE"][need["TE"]:], reverse=True)[:teams * starters["FLEX"]]
+    return {"QB": by["QB"][need["QB"]] + QB_STREAM, "TE": by["TE"][need["TE"]], "RB": flex[-1], "WR": flex[-1]}
+
+
+def league_curve(cfg):
+    T, picks = cfg["teams"], cfg["teams"] * cfg["rounds"]
+    pts_by_rank, seasons = collections.defaultdict(list), []
+    for Y in range(2021, 2026):
+        an = snap("pre", Y, 8, last=True)
+        A = skill_rank(pages[("pre", an)])
+        season, sp = collections.defaultdict(list), {}
+        for f, (e, ps) in pages[("pre", an)].items():
+            sid = ids.get(f); p = points[Y].get(sid, 0.0) if sid else 0.0
+            sp[f] = (p, ps); season[ps].append(p)
+        rp = repl_line(season, T, cfg["starters"])
+        seasons.append((A, sp, rp))
+        for f, r in A.items():
+            if r <= picks + 40:
+                p, ps = sp[f]
+                pts_by_rank[r].append(max(0.0, p - (rp[ps] - (QB_STREAM if ps == "QB" else 0))))
+    bw = T                                              # bands one round wide
+    bnds = []
+    for lo in range(1, picks + 1, bw):
+        v = [x for r in range(lo, lo + bw) for x in pts_by_rank.get(r, [])]
+        bnds.append((lo + (bw - 1) / 2, st.mean(v), len(v)))
+    best = None
+    for pi in range(4, 21):
+        pp = pi / 20
+        for ki in range(1, 400):
+            kk = ki / 400
+            xs_ = [math.exp(-kk * n ** pp) for n, _, _ in bnds]; ys_ = [m for _, m, _ in bnds]
+            mx_, my_ = st.mean(xs_), st.mean(ys_)
+            sxx = sum((x - mx_) ** 2 for x in xs_)
+            if not sxx:
+                continue
+            aa = sum((x - mx_) * (y - my_) for x, y in zip(xs_, ys_)) / sxx
+            cc = my_ - aa * mx_
+            sse = sum((aa * x + cc - y) ** 2 for x, y in zip(xs_, ys_))
+            if aa > 0 and (best is None or sse < best[0]):
+                best = (sse, aa, cc, kk, pp)
+    _, aa, cc, kk, pp = best
+    raw = lambda n: aa * math.exp(-kk * n ** pp) + cc
+    mid1 = (T + 1) / 2
+    scale = raw(mid1) - raw(picks)
+    val = lambda n: 100 * (raw(min(max(n, 1), picks)) - raw(picks)) / scale
+    grid = list(range(1, 21)) + list(range(25, picks, 5)) + [picks]
+    # position factor with this league's replacement line (QB includes streaming)
+    pv = {}
+    for pos in SKILL:
+        got = exp_ = 0.0
+        for A, sp, rp in seasons:
+            for f, r in A.items():
+                p, ps = sp[f]
+                if ps == pos and r <= picks * 0.9:
+                    got += max(0.0, p - rp[ps]) * 100 / scale; exp_ += val(r)
+        pv[pos] = round(got / exp_, 3) if exp_ else 1.0
+    return {"pick_value": [[n, round(val(n), 2)] for n in grid], "picks": picks, "teams": T, "rounds": cfg["rounds"],
+            "pos_value": pv, "fit": [round(aa, 2), round(cc, 2), kk, pp]}
+
+
+def league_price(key, cfg):
+    """Median Maywood-style draft tendency by position from the league's 2026 draft vs FantasyPros August 2026."""
+    try:
+        P = json.load(open(f"picks_{key}_2026.json"))
+    except FileNotFoundError:
+        return None
+    an = snap("pre", 2026, 8, last=True)
+    if not an:
+        return None
+    A = skill_rank(pages[("pre", an)])
+    sl2fp = {v: k for k, v in ids.items()}
+    bypos = collections.defaultdict(list)
+    for p in P:
+        f = sl2fp.get(p["player_id"]); pos = p["metadata"].get("position")
+        if f in A and pos in SKILL and A[f] <= cfg["teams"] * cfg["rounds"]:
+            bypos[pos].append(math.log(p["pick_no"]) - math.log(A[f]))
+    return {k: round(math.exp(st.median(v)), 3) for k, v in bypos.items() if len(v) >= 8}
+
+
+curves = {}
+for key, cfg in LEAGUE_CFG.items():
+    cv = league_curve(cfg)
+    if key != "maywood":
+        lp = league_price(key, cfg)
+        cv["pos_price"] = lp or pos_price
+        cv["pos_price_src"] = "2026 draft vs FantasyPros August 2026" if lp else "Maywood (no draft data)"
+    curves[key] = cv
+    pvv = dict(cv["pick_value"])
+    rv = lambda r: next(v for n, v in cv["pick_value"] if n >= cfg["teams"] * (r - 1) + (cfg["teams"] + 1) / 2)
+    print(f"  {key}: {cfg['teams']} teams × {cfg['rounds']} rounds, position value {cv['pos_value']}, "
+          f"price {cv.get('pos_price', pos_price)}")
+    print("    round value:", {r: rv(r) for r in (1, 2, 3, 4, 5, 6, 8, 10, 12, 14, cfg["rounds"])})
+
 json.dump({
     "generated": "2026-11-02", "years": [f"Nov {y} → Aug {y + 1}" for y in YEARS], "summary": summary,
     "age_shift": {f"{p}|{lab}": round(adj_all[(p, lab)], 4) for p in SKILL for _, _, lab in AGE_BUCKETS},
@@ -428,6 +533,6 @@ json.dump({
     "pick_curve_exp": {"a": round(a, 3), "b": round(b, 6), "c": round(c, 3)},
     "pick_value": pick_value, "picks": PICKS,
     "realized_bands": [[round(n, 1), round(m, 1), k] for n, m, k in bands],
-    "maywood_pos_price": pos_price, "sigma_preseason": round(sig_pre, 4), "pos_value": pos_val,
+    "maywood_pos_price": pos_price, "leagues": curves, "sigma_preseason": round(sig_pre, 4), "pos_value": pos_val,
 }, open("keeper_model.json", "w"), indent=1)
 print("\nwrote keeper_model.json")

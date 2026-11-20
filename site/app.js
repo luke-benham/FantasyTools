@@ -553,21 +553,32 @@ function kctx(key) {
   const by = new Map(K.players.map(x => [x.id, x]));
   const N = K.draws;
   const slotOf = rid => (K.slots || {})[rid] ?? null;            // projected draft slot: reverse standings
-  /** A team's keeper value: average over draws of its best candidate's value minus that candidate's cost pick at
-   *  the team's own draft slot (or nobody). Moving a player changes his cost to the new owner's slot. */
+  const NK = K.per_team || 1;                                     // keepers allowed per team
+  /** A team's keeper value: average over draws of its best NK candidates' value minus each one's cost pick at
+   *  the team's own draft slot (a negative candidate is simply not kept). Keepers are declared just before the
+   *  draft, so the choice is made per draw. Moving a player changes his cost to the new owner's slot. */
   const teamVal = (ids, rid) => {
     const sl = slotOf(rid);
     const xs = ids.map(id => by.get(id)).filter(Boolean).map(x => ({ v: x.v, c: kpv(K, kPick(K, x.cost, sl)) * 10 }));
     if (!xs.length) return 0;
     let t = 0;
-    for (let i = 0; i < N; i++) { let m = 0; for (const x of xs) { const d = x.v[i] - x.c; if (d > m) m = d; } t += m; }
+    const top = new Array(NK);
+    for (let i = 0; i < N; i++) {
+      top.fill(0);
+      for (const x of xs) {
+        const d = x.v[i] - x.c;
+        if (d <= top[NK - 1]) continue;
+        let j = NK - 1; while (j > 0 && top[j - 1] < d) { top[j] = top[j - 1]; j--; } top[j] = d;
+      }
+      for (let j = 0; j < NK; j++) t += top[j];
+    }
     return t / N / 10;
   };
   const idsOf = r => [...new Set([...r.players, ...r.reserve])].filter(id => by.has(id));
   const teams = c.L.rosters.map(r => {
     const ids = idsOf(r), v = teamVal(ids, r.rid);
     const ranked = ids.map(id => ({ id, x: by.get(id), add: v - teamVal(ids.filter(o => o !== id), r.rid) })).sort((a, b) => b.x.e - a.x.e);
-    return { r, ids, v, best: ranked[0], second: ranked[1], ranked };
+    return { r, ids, v, keep: ranked.slice(0, NK), next: ranked[NK], best: ranked[0], ranked };
   });
   const standing = [...c.L.rosters].sort((a, b) => (b.w - a.w) || (b.pf - a.pf)).map(r => r.rid);
   const contender = rid => standing.indexOf(rid) < Math.ceil(standing.length / 2);
@@ -575,12 +586,13 @@ function kctx(key) {
   const gain = id => teamVal([...mine.ids, id], c.me.rid) - mine.v;
   const mySlot = slotOf(c.me.rid);
   const asMine = (x, f) => { const a = f === 'K' ? x.Ks : f === 'run' ? x.runs : x.es; return a && mySlot ? a[mySlot - 1] : f === 'K' ? x.K : f === 'run' ? x.runway : x.e; };
-  c.k = { K, by, teamVal, teams, mine, gain, contender, standing, idsOf, slotOf, mySlot, asMine };
+  c.k = { K, by, teamVal, teams, mine, gain, contender, standing, idsOf, slotOf, mySlot, asMine, NK };
   return c.k;
 }
 const rnd = (pick, T) => Math.max(1, Math.ceil(pick / T));
-const priceTxt = (x, T) => rnd(x.price, T) > 17 ? 'Undrafted' : `R${rnd(x.price, T)}`;
-const priceRange = (x, T) => { const a = rnd(x.lo, T), b = Math.min(rnd(x.hi, T), 18); return a > 17 ? 'undrafted' : a === b ? `R${a}` : `R${a}–${b > 17 ? 'undrafted' : b}`; };
+const kRounds = K => K.rounds || 17;
+const priceTxt = (x, K) => rnd(x.price, K.teams) > kRounds(K) ? 'Undrafted' : `R${rnd(x.price, K.teams)}`;
+const priceRange = (x, K) => { const R = kRounds(K), a = rnd(x.lo, K.teams), b = Math.min(rnd(x.hi, K.teams), R + 1); return a > R ? 'undrafted' : a === b ? `R${a}` : `R${a}–${b > R ? 'undrafted' : b}`; };
 function originTxt(x) {
   if (x.origin === 'kept') return `kept ${x.keeps}×`;
   if (x.origin === 'undrafted') return 'undrafted';
@@ -593,7 +605,8 @@ function kpv(K, n) {
   return 0;
 }
 /** Overall pick of round r for draft slot sl in a snake draft (null slot = middle of the round). */
-const kPick = (K, r, sl) => sl == null ? K.teams * (r - 1) + (K.teams + 1) / 2 : K.teams * (r - 1) + (r % 2 ? sl : K.teams + 1 - sl);
+const kFwd = (K, r) => (!K.reversal || r < K.reversal) ? r % 2 === 1 : r % 2 === 0;   // snake; Gridiron reverses at round 3
+const kPick = (K, r, sl) => sl == null ? K.teams * (r - 1) + (K.teams + 1) / 2 : K.teams * (r - 1) + (kFwd(K, r) ? sl : K.teams + 1 - sl);
 const roundGap = (K, r) => kpv(K, K.teams * (r - 1) + (K.teams + 1) / 2) - kpv(K, K.teams * r + (K.teams + 1) / 2);
 /** Keeper delta of a trade for both sides (live rosters, same draws). */
 function keeperTrade(c, oppR, give, get) {
@@ -614,15 +627,15 @@ function renderKeepers() {
   const wk = S.D.meta.week, dl = L.deadline || K.rule.trade_deadline_week;
   const left = dl ? dl - wk : null;
   const tn = rid => { const r = c.rosterOf(rid); return r ? c.teamName(r) : 'Free agent'; };
-  const mine = kc.mine, best = mine.ranked[0], second = mine.ranked[1];
-  const opt = best ? mine.v - best.x.e : 0;
+  const mine = kc.mine, best = mine.ranked[0], keepNow = mine.ranked.slice(0, kc.NK).filter(y => y.x.e >= 0.5);
+  const opt = mine.v - keepNow.reduce((a, y) => a + y.x.e, 0);
 
   // ---- your candidates
   const myRows = mine.ranked.filter(y => S.kp.allMine || y.x.e >= 0.5 || y.add >= 0.3);
   const candRow = y => { const x = y.x, p = pl(x.id);
     return `<tr data-p="${esc(x.id)}"><td class="l pl"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div><div class="meta">${posTag(p)} ${esc(p.tm || 'FA')} · ${esc(originTxt(x))}</div></td>
       <td><b>${f1(x.e)}</b></td><td class="${y.add >= 0.5 ? 'pos-v' : 'zero'}">${y.add >= 0.05 ? '+' + f1(y.add) : '–'}</td>
-      <td>R${x.cost}</td><td>${priceTxt(x, T)}<div class="sm">${priceRange(x, T)}</div></td><td>${pctTxt(x.p_pos)}</td><td>${x.runway ? x.runway + ' yr' : '–'}</td><td>${f1(c.value(x.id))}</td></tr>`; };
+      <td>R${x.cost}</td><td>${priceTxt(x, K)}<div class="sm">${priceRange(x, K)}</div></td><td>${pctTxt(x.p_pos)}</td><td>${x.runway ? x.runway + ' yr' : '–'}</td><td>${f1(c.value(x.id))}</td></tr>`; };
   const candTable = `<div class="scroll"><table class="t kt"><thead><tr><th class="l">Player</th><th>Surplus</th><th>Adds</th><th>Cost</th><th>Goes</th><th>Worth it</th><th>Runway</th><th>Now</th></tr></thead>
     <tbody>${myRows.map(candRow).join('') || '<tr><td class="l" colspan="8">No keeper-worthy players yet.</td></tr>'}</tbody></table></div>
     ${mine.ranked.length > myRows.length || S.kp.allMine ? `<p class="note"><button class="linkbtn" data-kall="1">${S.kp.allMine ? 'Hide' : 'Show'} the ${mine.ranked.length - mine.ranked.filter(y => y.x.e >= 0.5 || y.add >= 0.3).length} players with no keeper value</button></p>` : ''}`;
@@ -644,7 +657,7 @@ function renderKeepers() {
     return `<button class="row krow${isMe ? ' me' : ''}" ${act}><div class="slot"><span class="rk">${i + 1}</span>${posTag(p)}</div>
       <div class="who"><div class="nm"><span class="tx">${esc(p.n)}</span>${injTag(p)}</div>
         <div class="meta">${esc(rid == null ? 'Free agent' : isMe ? 'Your team' : tn(rid))} · ${esc(originTxt(x))}${notes.length ? ' · <span class="kn">' + esc(notes.join(' · ')) + '</span>' : ''}</div>
-        <div class="meta">Costs R${x.cost} · goes ${priceTxt(x, T)} (${priceRange(x, T)}) · ${alt}${run > 1 ? ` · ${run} yr runway` : ''}</div></div>
+        <div class="meta">Costs R${x.cost} · goes ${priceTxt(x, K)} (${priceRange(x, K)}) · ${alt}${run > 1 ? ` · ${run} yr runway` : ''}</div></div>
       <div class="figs"><div class="fig"><div class="v">${f1(main)}</div><div class="u">${S.kp.sort === 'K' ? 'multi-yr' : 'keeper'}</div></div>
         <div class="fig wkf"><div class="v ${g != null && g >= 1 ? 'pos-v' : 'zero'}">${g == null ? '–' : g >= 0.05 ? '+' + f1(g) : '0'}</div><div class="u">adds you</div></div></div></button>`;
   };
@@ -671,7 +684,7 @@ function renderKeepers() {
   // ---- league keeper map
   const nmK = y => y ? `${esc(pl(y.id).n)} <span class="sm">R${y.x.cost} · ${f1(y.x.e)}</span>` : '<span class="zero">–</span>';
   const mapRows = [...kc.teams].sort((a, b) => b.v - a.v).map(t => `<tr class="${t.r.rid === me.rid ? 'me' : ''}"><td class="l">${esc(c.teamName(t.r))}<div class="sm">${t.r.w}–${t.r.l}${kc.contender(t.r.rid) ? ' · contender' : ''}</div></td>
-    <td class="l">${nmK(t.best)}</td><td class="l">${nmK(t.second)}</td><td><b>${f1(t.v)}</b></td></tr>`).join('');
+    <td class="l">${t.keep.length ? t.keep.map(nmK).join('<br>') : nmK(null)}</td><td class="l">${nmK(t.next)}</td><td><b>${f1(t.v)}</b></td></tr>`).join('');
 
   const modeChips = ['rebuild', 'compete'].map(m => `<button class="chip" data-kmode="${m}" aria-pressed="${S.kp.mode === m}">${m === 'rebuild' ? 'Rebuild' : 'Compete'}</button>`).join('');
   const sortChips = [['e', `Best ${K.season}`], ['K', 'Best multi-year']].map(([k, l]) => `<button class="chip" data-ksort="${k}" aria-pressed="${S.kp.sort === k}">${l}</button>`).join('');
@@ -679,21 +692,22 @@ function renderKeepers() {
   const deadline = left == null ? '' : left > 0 ? `${left} week${left === 1 ? '' : 's'} of trades left (deadline week ${dl})` : left === 0 ? `Trade deadline is this week (week ${dl})` : 'Trades are closed; keepers are declared before the draft';
   return `<section class="sec"><div class="kv-head card">
       <div class="kvh-main"><div class="k">Your ${K.season} keeper value · projected pick ${kc.mySlot || '?'} of ${T}</div><div class="big">${f1(mine.v)}</div>
-        <div class="s">${best ? `Best: ${esc(pl(best.id).n)} at R${best.x.cost} (${f1(best.x.e)})` : 'No candidates'}${opt >= 0.5 ? ` · holding your other candidates until August adds ${f1(opt)}` : ''}</div></div>
+        <div class="s">${keepNow.length ? `${kc.NK > 1 ? `Keep ${kc.NK}: ` : 'Best: '}${keepNow.map(y => `${esc(pl(y.id).n)} R${y.x.cost} (${f1(y.x.e)})`).join(', ')}` : 'No candidates'}${opt >= 0.5 ? ` · holding your other candidates until the draft adds ${f1(opt)}` : ''}</div>
+        ${K.history_known === false ? `<div class="s warn-s">${K.season - 1} keepers aren't recorded for ${esc(L.name)} yet, so costs assume nobody was kept last year. Players kept in ${K.season - 1} cost more than shown.</div>` : ''}</div>
       <div class="kvh-side"><div class="k">${esc(deadline)}</div><div class="chips">${modeChips}</div>
         <div class="s">${S.kp.mode === 'rebuild' ? 'Rebuild: keeper value counts 4× current value' : 'Compete: keeper and current value count the same'}</div></div></div>
-    <p class="note">Value is ${K.season} keeper surplus: the player's expected value minus the value of the pick he costs, on a scale where an average first-round pick is 100 and the end of the draft (pick ${T * 17}) is 0; the first few picks are worth more than 100. Moving a cost one round earlier costs about ${f1(roundGap(K, 1), 0)} points between rounds 1 and 2, ${f1(roundGap(K, 5), 0)} between rounds 5 and 6, and ${f1(roundGap(K, 10), 0)} between rounds 10 and 11.</p></section>
+    <p class="note">Value is ${K.season} keeper surplus: the player's expected value minus the value of the pick he costs, on a scale where an average first-round pick is 100 and the end of the draft (pick ${K.picks || T * 17}) is 0; the first few picks are worth more than 100. Moving a cost one round earlier costs about ${f1(roundGap(K, 1), 0)} points between rounds 1 and 2, ${f1(roundGap(K, 5), 0)} between rounds 5 and 6, and ${f1(roundGap(K, 10), 0)} between rounds 10 and 11.</p></section>
   <section class="sec"><h2>Keeper rankings<span class="aside">every team · valued as your keeper</span></h2>
     <div class="chips">${posChips}<span class="sep"></span>${sortChips}</div>${rankTable}
     <p class="note"><b>Keeper</b> is his ${K.season} keeper surplus if he were yours, with his cost at your projected draft slot (pick ${kc.mySlot || '?'} of ${T}). <b>Multi-yr</b> adds later seasons as the cost climbs (each later season counts 65%), with how many seasons he stays worth keeping. <b>Adds you</b> is how much he'd raise your own keeper value: a strong player adds little when one of your candidates already covers the same outcome. Tap a player on another team to open the trade builder with him selected.</p></section>
-  <section class="sec"><h2>Your candidates<span class="aside">${esc(L.name)} · keeper declared before the draft</span></h2>${candTable}
-    <p class="note"><b>Cost</b> is the ${K.season} round he'd cost to keep, taken at your projected draft slot (reverse of the current standings, snake order). A player whose cost would pass round 1 can't be kept and drops off. <b>Goes</b> is where Maywood would draft him next August, with an 80% range. <b>Surplus</b> averages over that range, counting a bad outcome as "keep someone else". <b>Worth it</b> is the chance he beats his cost. <b>Adds</b> is how much he raises your keeper value given your other candidates; two similar candidates both add, because you choose after the offseason. <b>Runway</b> is how many seasons he stays worth keeping as the cost climbs.</p></section>
+  <section class="sec"><h2>Your candidates<span class="aside">${esc(L.name)} · ${kc.NK > 1 ? `up to ${kc.NK} keepers` : '1 keeper'}, declared before the draft</span></h2>${candTable}
+    <p class="note"><b>Cost</b> is the ${K.season} round he'd cost to keep, taken at your projected draft slot (reverse of the current standings, snake order). A player whose cost would pass round 1 can't be kept and drops off. <b>Goes</b> is where ${esc(L.name)} would draft him next August, with an 80% range. <b>Surplus</b> averages over that range, counting a bad outcome as "keep someone else". <b>Worth it</b> is the chance he beats his cost. <b>Adds</b> is how much he raises your keeper value given your other candidates; two similar candidates both add, because you choose after the offseason${kc.NK > 1 ? ` (you keep up to ${kc.NK})` : ''}. <b>Runway</b> is how many seasons he stays worth keeping as the cost climbs.</p></section>
   <section class="sec"><h2>Sell to contenders<span class="aside">worth more now than as your keeper</span></h2>
     <div class="list">${sells.map(sellRow).join('') || '<div class="empty">No players with current value and no keeper role.</div>'}</div>
     <p class="note">Contenders are the top half of the standings. A team fits when your player would start over their weakest starter at his position. Tap to open the trade builder.</p></section>
-  <section class="sec"><h2>League keeper map<span class="aside">best and second-best candidate per team</span></h2>
-    <div class="scroll"><table class="t kmap"><thead><tr><th class="l">Team</th><th class="l">Best</th><th class="l">Second</th><th>Value</th></tr></thead><tbody>${mapRows}</tbody></table></div></section>
-  <p class="note">How it's built: next August's draft price blends FantasyPros dynasty rank${K.fc_error ? '' : ', FantasyCalc dynasty value'} and FantasyPros rest-of-season rank (${Math.round(K.model.blend_weight_dynasty * 100)}/${100 - Math.round(K.model.blend_weight_dynasty * 100)}), shifted for age, then priced the way Maywood drafts (RBs and TEs go earlier, QBs later). Tested on November 2020–24 rankings against the next August's prices: rank correlation ${f1(K.model.backtest['Blend + age'].rho_price, 2)}. Player value comes from what players at each preseason rank actually scored above replacement in 2021–25; QBs count about half as much as other positions drafted at the same spot (${f1(K.model.pos_value.QB / K.model.pos_value.WR * 100, 0)}%) because free-agent QBs can be streamed. Costs follow the keeper history in <code>inputs/keepers/${esc(K.league)}.json</code>.</p>`;
+  <section class="sec"><h2>League keeper map<span class="aside">${kc.NK > 1 ? `top ${kc.NK} candidates and the next one up` : 'best and second-best candidate'} per team</span></h2>
+    <div class="scroll"><table class="t kmap"><thead><tr><th class="l">Team</th><th class="l">${kc.NK > 1 ? 'Would keep' : 'Best'}</th><th class="l">${kc.NK > 1 ? 'Next up' : 'Second'}</th><th>Value</th></tr></thead><tbody>${mapRows}</tbody></table></div></section>
+  <p class="note">How it's built: next August's draft price blends FantasyPros dynasty rank${K.fc_error ? '' : ', FantasyCalc dynasty value'} and FantasyPros rest-of-season rank (${Math.round(K.model.blend_weight_dynasty * 100)}/${100 - Math.round(K.model.blend_weight_dynasty * 100)}), shifted for age, then priced the way Maywood drafts (RBs and TEs go earlier, QBs later; measured on Maywood's 2024–25 drafts and used for every league). Tested on November 2020–24 rankings against the next August's prices: rank correlation ${f1(K.model.backtest['Blend + age'].rho_price, 2)}. Player value comes from what players at each preseason rank actually scored above replacement in 2021–25, for this league's size and lineup (${T} teams, ${kRounds(K)} rounds); QBs count about half as much as other positions drafted at the same spot (${f1(K.model.pos_value.QB / K.model.pos_value.WR * 100, 0)}%) because free-agent QBs can be streamed. Costs follow the keeper history in <code>inputs/keepers/${esc(K.league)}.json</code>.</p>`;
 }
 
 // ---------------------------------------------------------------- SIGNALS tab
@@ -751,7 +765,7 @@ function keeperSheet(id) {
     const K = kc.K, T = K.teams, L = ctx(key).L;
     const yrs = x.years.map(y => `<tr><td class="l">${y.y}</td><td>R${y.c}</td><td>R${rnd(y.p, T)}</td><td>${f1(y.e)}</td></tr>`).join('');
     return `<h4>${esc(L.name)} keeper</h4><div class="kv"><div><div class="k">Cost ${K.season}</div><div class="v">R${x.cost}</div><div class="s">${esc(originTxt(x))}</div></div>
-      <div><div class="k">Goes</div><div class="v">${priceTxt(x, T)}</div><div class="s">${priceRange(x, T)} · pick ${Math.round(x.price)}</div></div>
+      <div><div class="k">Goes</div><div class="v">${priceTxt(x, K)}</div><div class="s">${priceRange(x, K)} · pick ${Math.round(x.price)}</div></div>
       <div><div class="k">Surplus</div><div class="v">${f1(x.e)}</div><div class="s">${pctTxt(x.p_pos)} worth keeping</div></div></div>
       <div class="sub">FantasyPros dynasty ${x.src.fp ? '#' + x.src.fp : '–'} · FantasyCalc dynasty ${x.src.fc ? '#' + x.src.fc : '–'} · FantasyPros ROS ${x.src.ros ? '#' + x.src.ros : '–'} (skill players) · age ${x.age} next August</div>
       ${x.years.length > 1 ? `<table class="t mini"><thead><tr><th class="l">Season</th><th>Cost</th><th>Goes</th><th>Surplus</th></tr></thead><tbody>${yrs}</tbody></table>` : ''}`;

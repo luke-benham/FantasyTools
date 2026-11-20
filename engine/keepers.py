@@ -32,14 +32,37 @@ MAX_YEARS = 5
 # ---------------------------------------------------------------- model pieces
 PV = MODEL["pick_value"]
 PICKS = MODEL["picks"]
+_CUR = {"pv": PV, "picks": PICKS}        # the league being built: its own curve (size, lineup, draft length)
+
+
+def skill_norm(pv):
+    """Position value relative to RB/WR/TE. The raw curve averages every player taken at a pick, QBs included, so
+    a flex player drafted exactly where he belongs realizes 8–35% more than the curve (more in 8-team, 3-FLEX
+    leagues). A pick is spent on whoever is best there, so the cost of a pick is a flex player's value at it:
+    RB/WR/TE are scaled to 1.0 and QB keeps its relative discount."""
+    m = (pv["RB"] + pv["WR"] + pv["TE"]) / 3
+    return {k: round(v / m, 3) for k, v in pv.items()}
+
+
+def use_curve(key):
+    """Pick the league's curve: Maywood's main fit, or the per-league fit from research section 7."""
+    lc = (MODEL.get("leagues") or {}).get(key)
+    if key == "maywood" or not lc:
+        _CUR.update(pv=PV, picks=PICKS)
+        return {"pick_value": PV, "picks": PICKS, "pos_value": skill_norm(MODEL["pos_value"]), "pos_price": MODEL["maywood_pos_price"]}
+    _CUR.update(pv=lc["pick_value"], picks=lc["picks"])
+    return {"pick_value": lc["pick_value"], "picks": lc["picks"], "pos_value": skill_norm(lc["pos_value"]),
+            "pos_price": lc.get("pos_price") or MODEL["maywood_pos_price"]}
 
 
 def pick_value(n):
-    """Value of overall pick n: 100 at pick 1, 0 at the waiver line (pick 170). Realized 2021-25 points above replacement."""
-    n = min(max(n, 1.0), PICKS)
-    for i in range(1, len(PV)):
-        if n <= PV[i][0]:
-            x0, y0 = PV[i - 1]; x1, y1 = PV[i]
+    """Value of overall pick n: 100 = an average first-round pick, 0 at the waiver line (the league's last pick).
+    Realized 2021-25 points above replacement for the league's lineup."""
+    pv, picks = _CUR["pv"], _CUR["picks"]
+    n = min(max(n, 1.0), picks)
+    for i in range(1, len(pv)):
+        if n <= pv[i][0]:
+            x0, y0 = pv[i - 1]; x1, y1 = pv[i]
             return y0 + (y1 - y0) * (n - x0) / (x1 - x0)
     return 0.0
 
@@ -59,12 +82,17 @@ def drift(pos, age):
     return MODEL["drift_yoy"][f"{pos}|{bucket(int(age))}"]
 
 
-def round_pick(rnd, teams, slot=None):
-    """Overall pick of a keeper cost round in a snake draft. slot = the owner's draft slot (1 = first pick);
-    None = middle of the round."""
+def forward(rnd, rev=0):
+    """Does round rnd run slot 1 -> N? Snake; with a third-round reversal (Sleeper reversal_round = 3) round 3
+    repeats round 2's direction and the alternation flips from there."""
+    return (rnd % 2 == 1) if (not rev or rnd < rev) else (rnd % 2 == 0)
+
+
+def round_pick(rnd, teams, slot=None, rev=0):
+    """Overall pick of a keeper cost round. slot = the owner's draft slot (1 = first pick); None = middle of the round."""
     if slot is None:
         return teams * (rnd - 1) + (teams + 1) / 2
-    return teams * (rnd - 1) + (slot if rnd % 2 == 1 else teams + 1 - slot)
+    return teams * (rnd - 1) + (slot if forward(rnd, rev) else teams + 1 - slot)
 
 
 def project_slots(rosters):
@@ -118,8 +146,8 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
     R = H["rule"]
     season, nxt = C.SEASON, C.SEASON + 1
     teams = L["teams"]
-    last_round = len(L["slots"])                       # Maywood: 17 rounds = 17 roster spots
     seasons = H["seasons"]
+    curve = use_curve(L["key"])
 
     # ---- keeper streaks and this season's draft
     kept = {y: {k["id"] for k in s.get("keepers", [])} for y, s in seasons.items()}
@@ -133,12 +161,16 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
     draft_id = seasons.get(str(season), {}).get("draft_id")
     picks = json_get(f"{SL}/v1/draft/{draft_id}/picks", max_age_h=24, name=f"picks_{draft_id}.json") if draft_id else []
     drafted = {p["player_id"]: p for p in picks}
+    dinfo = json_get(f"{SL}/v1/draft/{draft_id}", max_age_h=24, name=f"draft_{draft_id}.json") if draft_id else {}
+    dset = (dinfo or {}).get("settings") or {}
+    last_round = int(H.get("rounds") or dset.get("rounds") or len(L["slots"]))
+    rev = int(H.get("reversal_round", dset.get("reversal_round") or 0) or 0)
 
     def cost_rounds(sid):
         """Cost round for nxt, nxt+1, ... while keepable. Cost follows the player through trades and drops."""
         k = streak(sid)
         p = drafted.get(sid)
-        base = p["round"] if p else R.get("undrafted_base_round", last_round + 1)
+        base = p["round"] if p else last_round + 1        # undrafted: first keep costs the last round
         out, c = [], base
         for t in range(MAX_YEARS):
             c = c - (k + 1 + t)
@@ -169,8 +201,8 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
     pre = skill_rank(pre_pairs) if len(pre_pairs) >= 150 else {}
     mode = "preseason" if pre else "dynasty"
     w = MODEL["blend_weight_dynasty"]
-    posf = MODEL["maywood_pos_price"]
-    posv = MODEL["pos_value"]
+    posf = curve["pos_price"]
+    posv = curve["pos_value"]
     aug = dt.date(nxt, 8, 15)
 
     slots = project_slots(L["rosters"])
@@ -213,7 +245,7 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
         if not costs:
             continue
         own_slot = slots.get(rostered.get(sid))               # None for free agents: middle of the round
-        c_pick = round_pick(costs[0], teams, own_slot)
+        c_pick = round_pick(costs[0], teams, own_slot, rev)
         c_val = pick_value(c_pick)
 
         # this season's value draws (seeded per player so refreshes only move when inputs move); the app
@@ -221,7 +253,7 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
         rng = random.Random(int(sid) if sid.isdigit() else hash(sid))
         vdraws = [round(pv * pick_value(rank * math.exp(sd * rng.gauss(0, 1))) * 10) for _ in range(N_DRAWS)]
         e1 = sum(max(0.0, v / 10 - c_val) for v in vdraws) / N_DRAWS
-        es = [round(sum(max(0.0, v / 10 - pick_value(round_pick(costs[0], teams, sl))) for v in vdraws) / N_DRAWS, 1)
+        es = [round(sum(max(0.0, v / 10 - pick_value(round_pick(costs[0], teams, sl, rev))) for v in vdraws) / N_DRAWS, 1)
               for sl in range(1, teams + 1)]
         if max(es) < 0.3 and sid not in rostered and sid not in drafted:
             continue
@@ -234,7 +266,7 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
                 if t:
                     pr *= math.exp(drift(pos, age + t))
                     s2 += MODEL["sigma_yoy"][pos] ** 2
-                ev = e_pos(pr, math.sqrt(s2), pick_value(round_pick(cr, teams, slot)), pv)
+                ev = e_pos(pr, math.sqrt(s2), pick_value(round_pick(cr, teams, slot, rev)), pv)
                 yrs.append({"y": nxt + t, "c": cr, "p": round(pr * posf.get(pos, 1.0), 1), "e": round(ev, 1)})
                 K += DISCOUNT ** t * ev
             run = 0
@@ -264,8 +296,9 @@ def build_keepers(L, PL, ecrdb, ids, ros_ovr, now):
         "league": L["key"], "season": nxt, "generated": now.isoformat(timespec="minutes"), "mode": mode,
         "preseason_date": pre_date, "fc_error": fc_err, "draws": N_DRAWS, "teams": teams,
         "per_team": H.get("keepers_per_team", 1), "rule": R, "slots": slots,
+        "rounds": last_round, "reversal": rev, "picks": curve["picks"], "history_known": bool(H.get("history_known", True)),
         "kept": {y: sorted(v) for y, v in kept.items()},
-        "model": {"pick_value": PV, "blend_weight_dynasty": w, "pos_price": posf, "pos_value": posv, "discount": DISCOUNT,
+        "model": {"pick_value": curve["pick_value"], "blend_weight_dynasty": w, "pos_price": posf, "pos_value": posv, "discount": DISCOUNT,
                   "sigma": MODEL["sigma_nov_aug"] if mode == "dynasty" else MODEL["sigma_preseason"],
                   "backtest": MODEL["summary"], "years": MODEL["years"]},
         "players": out,

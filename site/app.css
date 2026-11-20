@@ -258,3 +258,4 @@ code{font-size:12px}
 .krow.me{background:var(--lg-t)}
 .krow .kn{color:var(--good)}
 .chips .sep{width:8px}
+.kv-head .warn-s{color:var(--warn, #9a5b00);margin-top:4px}

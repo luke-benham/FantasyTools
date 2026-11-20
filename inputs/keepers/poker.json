@@ -1,0 +1,25 @@
+{
+  "_about": "Poker keeper history. Edit after each keeper declaration; the next refresh picks it up. Ids are Sleeper player ids. 'keepers' lists every player kept that season; a player's escalation counts the consecutive seasons he appears here.",
+  "league": "poker",
+  "keepers_per_team": 3,
+  "history_known": true,
+  "history_note": "2026 was the league's first season, so nobody was kept in 2026: every player's first keep costs one round earlier than his 2026 pick (undrafted: the last round).",
+  "rule": {
+    "first_keep_rounds_earlier": 1,
+    "escalation": "same as Maywood: each consecutive keep moves the cost one more round earlier than the last (-1, -2, -3 ...)",
+    "undrafted": "first keep costs the last round, then escalates the same way",
+    "floor_at_round_1": false,
+    "floor_note": "a player whose cost would pass round 1 can't be kept",
+    "draft_order": "assumed reverse regular-season standings, snake (as Maywood) - confirm",
+    "cost_follows_player": "traded and dropped players keep their original draft cost",
+    "trade_deadline_week": 12,
+    "declaration": "right before the next draft"
+  },
+  "seasons": {
+    "2026": {
+      "draft_id": "1403194739380977664",
+      "keepers": [],
+      "note": "first season, no keepers"
+    }
+  }
+}
